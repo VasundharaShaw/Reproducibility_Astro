@@ -2,10 +2,10 @@ import argparse
 import json
 from pathlib import Path
 
-from scripts.notebook.loader import load_notebook
-from scripts.notebook.diff import diff_notebooks_safe
-from scripts.notebook.summary import build_detailed_summary, extract_error_from_notebook
-from scripts.notebook.filesystem import ensure_parent_dir
+from scripts.nbprocess.loader import load_notebook
+from scripts.nbprocess.diff import diff_notebooks_safe
+from scripts.nbprocess.summary import build_detailed_summary, extract_error_from_notebook
+from scripts.nbprocess.filesystem import ensure_parent_dir
 
 def main():
     parser = argparse.ArgumentParser()

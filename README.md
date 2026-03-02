@@ -88,6 +88,7 @@ LOGS_DIR="data/logs"
 
 ### Quick Start
 ```bash
+cd scripts
 # Process a single repository
 ./main.sh 
 
