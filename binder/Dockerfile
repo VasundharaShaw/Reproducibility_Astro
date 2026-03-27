@@ -16,8 +16,9 @@ RUN curl -fsSL https://get.docker.com | sh
 # Install repo2docker and pipeline dependencies
 RUN pip install --no-cache-dir \
     jupyter-repo2docker \
-    GitPython \
+    notebook \
     jupyterlab \
+    GitPython \
     nbconvert \
     nbdime \
     nbformat \
@@ -41,3 +42,8 @@ RUN adduser --disabled-password \
     ${NB_USER}
 
 WORKDIR ${HOME}
+
+# Make shell scripts executable
+COPY . ${HOME}
+RUN chmod +x ${HOME}/scripts/main.sh && \
+    chmod +x ${HOME}/lib/*.sh
