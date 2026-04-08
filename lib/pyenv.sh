@@ -11,7 +11,7 @@
 PYENV_ROOT="${PYENV_ROOT:-$HOME/.pyenv}"
 export PYENV_ROOT
 export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
-
+eval "$(pyenv init -)"
 VENV_BASE_DIR="${VENV_BASE_DIR:-$HOME/.repo_venvs}"
 
 # Error state — mirrors DOCKER_ERROR_TYPE / DOCKER_ERROR_MESSAGE in docker.sh
