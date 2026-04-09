@@ -69,11 +69,10 @@ echo "2. Use SQLite flow"
 read -p "Enter your choice (1 or 2): " choice
 
 if [ "$choice" -eq 1 ]; then
-    # User input case
     prompt_for_input
-    # Process the user-provided repo
+    REPO_ID=$(get_or_create_repo_id "$GITHUB_REPO")
+    export REPO_ID
     process_repo "$GITHUB_REPO" "$NOTEBOOK_PATHS" "$SETUP_PATHS" "$REQUIREMENT_PATHS"
-
 else
     process_sqlite_flow
 fi
