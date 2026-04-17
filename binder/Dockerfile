@@ -9,7 +9,7 @@ ENV HOME=/home/${NB_USER}
 # System packages — includes pyenv build dependencies
 # ---------------------------------------------------------------
 RUN apt-get update -qq && \
-    apt-get install -qq --yes --no-install-recommends \
+    apt-get install --yes --no-install-recommends \
         ca-certificates \
         curl \
         wget \
