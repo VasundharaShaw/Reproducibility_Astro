@@ -6,18 +6,17 @@
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 INPUT_DIR="$PROJECT_ROOT/input"
-
 OUTPUT_DIR="$PROJECT_ROOT/output"
 REPOS_DIR="$OUTPUT_DIR/cloned_repos"
 COMP_DIR="$OUTPUT_DIR/comparisons"
 LOG_DIR="$OUTPUT_DIR/logs"
-DB_DIR="$OUTPUT_DIR/db"
-DB_FILE="${DB_FILE:-$DB_DIR/db.sqlite}"
+DB_DIR="$PROJECT_ROOT/data"
+DB_FILE="$DB_DIR/db.sqlite"
 TARGET_COUNT="${TARGET_COUNT:-10}"
 
 initialize_directories() {
     mkdir -p "$INPUT_DIR"
-    mkdir -p "$REPOS_DIR" "$COMP_DIR" "$LOG_DIR" "$DB_DIR"
+    mkdir -p "$REPOS_DIR" "$COMP_DIR" "$LOG_DIR"
     log "[INIT] Initialized directory structure"
 }
 
