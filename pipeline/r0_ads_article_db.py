@@ -87,18 +87,30 @@ def build_query(start_date, end_date):
     """
     Build the ADS search query string.
 
-    Mirrors the original PMC query:
-        (ipynb OR jupyter OR ipython) AND github
+    Strategy: search for papers that mention Jupyter/notebooks anywhere
+    (abstract OR title OR body), combined with GitHub anywhere
+    (abstract OR title OR body OR links).
 
-    We add a high-energy astrophysics category filter and a date range.
+    We deliberately do NOT require both to appear in the abstract — many
+    papers link to GitHub without mentioning it in the abstract text.
+    ADS will return the links_data field which we mine for GitHub URLs
+    at parse time in r1_ads_article_metadata.py.
     """
-    category_filter  = " OR ".join(f"arxiv_class:{c}" for c in HEP_CATEGORIES)
-    jupyter_filter   = 'abs:"jupyter" OR abs:"ipynb" OR abs:"ipython"'
-    github_filter    = 'abs:"github"'
-    date_filter      = f"pubdate:[{start_date} TO {end_date}]"
+    category_filter = " OR ".join(f"arxiv_class:{c}" for c in HEP_CATEGORIES)
+
+    # Search abstract AND title for Jupyter mentions
+    jupyter_filter = (
+        'abs:"jupyter" OR abs:"ipynb" OR abs:"ipython" OR '
+        'title:"jupyter" OR title:"notebook"'
+    )
+
+    # GitHub can appear anywhere — abstract, title, or full body text
+    github_filter = 'abs:"github" OR title:"github" OR body:"github"'
+
+    date_filter = f"pubdate:[{start_date} TO {end_date}]"
 
     return (
-        f"({jupyter_filter}) AND {github_filter} "
+        f"({jupyter_filter}) AND ({github_filter}) "
         f"AND ({category_filter}) "
         f"AND {date_filter}"
     )
