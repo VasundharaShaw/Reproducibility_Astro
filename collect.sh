@@ -48,28 +48,20 @@ echo "[CHECK] ADS_API_TOKEN is set."
 echo "[CHECK] python3 found."
 echo ""
 
-# ── Step 1: Fetch articles from NASA ADS ──────────────────────────────────────
+# ── Fetch and populate in one step ────────────────────────────────────────────
 
 echo "--------------------------------------------"
-echo " Step 1: Fetching articles from NASA ADS"
+echo " Fetching from NASA ADS → data/db.sqlite"
 echo "--------------------------------------------"
-python3 "$SCRIPT_DIR/pipeline/r0_ads_article_db.py"
-echo ""
-
-# ── Step 2: Parse and populate the database ───────────────────────────────────
-
-echo "--------------------------------------------"
-echo " Step 2: Populating database"
-echo "--------------------------------------------"
-python3 "$SCRIPT_DIR/pipeline/r1_ads_article_metadata.py"
+python3 "$SCRIPT_DIR/pipeline/collect_ads.py"
 echo ""
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 echo "============================================"
 echo " Data collection complete."
-echo " data/ads_results.json  — raw ADS results"
-echo " data/db.sqlite         — populated database"
+echo " data/db.sqlite — populated with articles,"
+echo "   journals, authors, and repositories."
 echo ""
 echo " You can now run the pipeline:"
 echo "   bash run.sh"
