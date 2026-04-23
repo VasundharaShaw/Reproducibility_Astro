@@ -77,9 +77,9 @@ HEP_CATEGORIES = [
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def get_date_range_last_12_months():
-    """Return (start_date, end_date) as YYYY-MM-DD strings."""
+    """Return (start_date, end_date) as YYYY-MM-DD strings covering the last 5 years."""
     today = datetime.date.today()
-    start = today.replace(year=today.year - 1)
+    start = today.replace(year=today.year - 5)
     return start.isoformat(), today.isoformat()
 
 
@@ -104,8 +104,11 @@ def build_query(start_date, end_date):
         'title:"jupyter" OR title:"notebook"'
     )
 
-    # GitHub can appear anywhere — abstract, title, or full body text
-    github_filter = 'abs:"github" OR title:"github" OR body:"github"'
+    # GitHub mention anywhere in abstract or title
+    # Note: we don't require this — many papers link to GitHub only in
+    # the code availability section which isn't indexed in abs:
+    # r1_ads_article_metadata.py will mine links_data for GitHub URLs
+    github_filter = 'abs:"github" OR title:"github"'
 
     date_filter = f"pubdate:[{start_date} TO {end_date}]"
 
