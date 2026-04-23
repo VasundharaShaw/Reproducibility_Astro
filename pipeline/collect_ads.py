@@ -163,7 +163,18 @@ def extract_github_links(record):
         if isinstance(entries, str):
             entries = json.loads(entries)
         for entry in entries:
-            url = entry.get("url", "")
+            # ADS returns links_data as either dicts or raw strings
+            if isinstance(entry, dict):
+                url = entry.get("url", "")
+            elif isinstance(entry, str):
+                # try to parse as JSON, otherwise treat as raw URL
+                try:
+                    entry = json.loads(entry)
+                    url = entry.get("url", "") if isinstance(entry, dict) else entry
+                except (json.JSONDecodeError, TypeError):
+                    url = entry
+            else:
+                continue
             if "github" in url.lower():
                 raw.append(url)
     except (json.JSONDecodeError, TypeError):
