@@ -55,8 +55,13 @@ FIELDS = [
     "issn",         #                     → journal.issn_epub
 ]
 
-HEP_CATEGORIES = [
+ASTRO_CATEGORIES = [
     "astro-ph.HE",  # high energy astrophysical phenomena
+    "astro-ph.GA",  # astrophysics of galaxies
+    "astro-ph.CO",  # cosmology and nongalactic astrophysics
+    "astro-ph.EP",  # earth and planetary astrophysics
+    "astro-ph.IM",  # instrumentation and methods for astrophysics
+    "astro-ph.SR",  # solar and stellar astrophysics
     "hep-ex",       # high energy physics - experiment
     "hep-ph",       # high energy physics - phenomenology
     "hep-th",       # high energy physics - theory
@@ -310,7 +315,7 @@ def get_date_range():
 
 
 def build_query(start_date, end_date):
-    category_filter = " OR ".join(f"arxiv_class:{c}" for c in HEP_CATEGORIES)
+    category_filter = " OR ".join(f"arxiv_class:{c}" for c in ASTRO_CATEGORIES)
     jupyter_filter  = (
         'abs:"jupyter" OR abs:"ipynb" OR abs:"ipython" OR '
         'title:"jupyter" OR title:"notebook"'
@@ -324,7 +329,7 @@ def build_query(start_date, end_date):
 
 ##### Collecting repos that mention ONLY Github and  NOT jupyter 
 # def build_query(start_date, end_date):
-#     category_filter = " OR ".join(f"arxiv_class:{c}" for c in HEP_CATEGORIES)
+#     category_filter = " OR ".join(f"arxiv_class:{c}" for c in ASTRO_CATEGORIES)
 #     github_filter   = 'abs:"github" OR title:"github"'
 #     date_filter     = f"pubdate:[{start_date} TO {end_date}]"
 #     return f"({github_filter}) AND ({category_filter}) AND {date_filter}"
