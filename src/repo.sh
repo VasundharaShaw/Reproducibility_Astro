@@ -204,11 +204,13 @@ process_sqlite_flow() {
         fi
 
         # Read next repo from input DB_FILE
+        # WHERE 1=1 ensures the AND in not_in_clause is always valid
         repo_data=$(sqlite3 "$DB_FILE" <<EOF
 .mode csv
 .headers off
 SELECT r.id, r.repository
 FROM repositories r
+WHERE 1=1
 $not_in_clause
 ORDER BY r.id LIMIT 1;
 EOF
