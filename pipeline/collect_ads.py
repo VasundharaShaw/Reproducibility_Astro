@@ -303,7 +303,7 @@ def create_repositories(conn, article_id, repo_links):
 
 def get_date_range():
     today = datetime.date.today()
-    start = today.replace(year=today.year - 5)
+    start = today.replace(year=today.year - 15)
     return start.isoformat(), today.isoformat()
 
 
