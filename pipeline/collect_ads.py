@@ -306,6 +306,8 @@ def get_date_range():
     start = today.replace(year=today.year - 15)
     return start.isoformat(), today.isoformat()
 
+##### Collecting repos that mention both Github and jupyter 
+
 
 def build_query(start_date, end_date):
     category_filter = " OR ".join(f"arxiv_class:{c}" for c in HEP_CATEGORIES)
@@ -320,6 +322,12 @@ def build_query(start_date, end_date):
         f"AND ({category_filter}) AND {date_filter}"
     )
 
+##### Collecting repos that mention ONLY Github and  NOT jupyter 
+# def build_query(start_date, end_date):
+#     category_filter = " OR ".join(f"arxiv_class:{c}" for c in HEP_CATEGORIES)
+#     github_filter   = 'abs:"github" OR title:"github"'
+#     date_filter     = f"pubdate:[{start_date} TO {end_date}]"
+#     return f"({github_filter}) AND ({category_filter}) AND {date_filter}"
 
 def fetch_page(query, start, rows):
     if not ADS_API_TOKEN:
