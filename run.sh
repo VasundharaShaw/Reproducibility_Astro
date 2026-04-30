@@ -1,18 +1,17 @@
 #!/bin/bash
 ###############################################################################
-# CPRPMC — Entry Point
+# Reproducibility Astro — Entry Point
 #
-# Usage: ./run.sh
+# Usage: bash run.sh
 #
 # This script checks dependencies, then launches the pipeline.
 ###############################################################################
-
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "============================================"
-echo "   CPRPMC Reproducibility Pipeline"
+echo "   Reproducibility Astro Pipeline"
 echo "============================================"
 
 fail() { echo "[ERROR] $*"; exit 1; }
@@ -21,7 +20,6 @@ command -v python3 >/dev/null 2>&1 || fail "python3 not found. Please install Py
 command -v sqlite3 >/dev/null 2>&1 || fail "sqlite3 not found. Please install SQLite."
 command -v git     >/dev/null 2>&1 || fail "git not found. Please install git."
 command -v pyenv   >/dev/null 2>&1 || fail "pyenv not found. See https://github.com/pyenv/pyenv#installation"
-command -v jupyter >/dev/null 2>&1 || fail "jupyter not found. Run: pip install jupyter nbconvert"
 
 echo "[CHECK] All dependencies found."
 echo ""

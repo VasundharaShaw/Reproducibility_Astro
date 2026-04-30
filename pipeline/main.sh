@@ -1,17 +1,14 @@
 #!/bin/bash
 ###############################################################################
-# CPRPMC Reproducibility Pipeline — Main Orchestrator
+# Reproducibility Astro Pipeline — Main Orchestrator
 #
-# Author:      Sheeba Samuel <sheeba.samuel@informatik.tu-chemnitz.de>
 # Co-authors:  Vasundhara Shaw
-# Institution: Chemnitz University of Technology
 # License:     GPL-3.0
 #
 # Usage:
-#   From repo root:  ./run.sh
+#   From repo root:  bash run.sh
 #   Directly:        bash pipeline/main.sh
 ###############################################################################
-
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,13 +26,16 @@ source "$PROJECT_ROOT/src/repo.sh"
 export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
 
 initialize_directories
+ensure_pipeline_tables
 
 log "[MAIN] Starting pipeline..."
 log "[MAIN] PROJECT_ROOT : $PROJECT_ROOT"
-log "[MAIN] Database     : $DB_FILE"
-log "[MAIN] Logs         : $LOG_DIR"
+log "[MAIN] Input DB     : $DB_FILE"
+log "[MAIN] Output DB    : $OUTPUT_DB_FILE"
+log "[MAIN] Repos dir    : $REPOS_DIR"
+log "[MAIN] Logs dir     : $LOG_DIR"
 
-ensure_pipeline_tables
+# ── Prompt ────────────────────────────────────────────────────────────────────
 
 prompt_for_input() {
     read -p "Enter GitHub repo URL: " GITHUB_REPO
@@ -43,6 +43,8 @@ prompt_for_input() {
     read -p "Enter setup paths (semicolon-separated, optional): " SETUP_PATHS
     read -p "Enter requirements paths (semicolon-separated, optional): " REQUIREMENT_PATHS
 }
+
+# ── Summary ───────────────────────────────────────────────────────────────────
 
 print_run_summary() {
     local elapsed=$(( $(date +%s) - $1 ))
@@ -63,6 +65,8 @@ print_run_summary() {
     echo "════════════════════════════════════════"
     echo ""
 }
+
+# ── Run ───────────────────────────────────────────────────────────────────────
 
 RUN_START=$(date +%s)
 
