@@ -316,11 +316,18 @@ def get_date_range():
 
 def build_query(start_date, end_date):
     category_filter = " OR ".join(f"arxiv_class:{c}" for c in ASTRO_CATEGORIES)
-    jupyter_filter  = (
-        'abs:"jupyter" OR abs:"ipynb" OR abs:"ipython" OR '
-        'title:"jupyter" OR title:"notebook"'
+    # jupyter_filter  = (
+    #     'abs:"jupyter" OR abs:"ipynb" OR abs:"ipython" OR '
+    #     'title:"jupyter" OR title:"notebook"'
+    # )
+    # github_filter   = 'abs:"github" OR title:"github"'
+
+    jupyter_filter = (
+    'abs:"jupyter" OR abs:"ipynb" OR abs:"ipython" OR '
+    'title:"jupyter" OR title:"notebook" OR '
+    'body:"jupyter" OR body:"ipynb"'
     )
-    github_filter   = 'abs:"github" OR title:"github"'
+    github_filter = 'abs:"github" OR title:"github" OR body:"github"'
     date_filter     = f"pubdate:[{start_date} TO {end_date}]"
     return (
         f"({jupyter_filter}) AND ({github_filter}) "
