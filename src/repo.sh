@@ -228,6 +228,11 @@ EOF
         export REPO_ID
 
         # Check if already processed in output DB
+        if [ -z "$REPO_ID" ]; then
+            log "[BATCH] Could not get repo ID, skipping."
+            processed_repo_ids+=("$INPUT_REPO_ID")
+            continue
+        fi
         already_run=$(sqlite3 "$OUTPUT_DB_FILE" "SELECT COUNT(*) FROM repository_runs WHERE repository_id=$REPO_ID;")
         if [ "$already_run" -gt 0 ]; then
             log "[BATCH] Repo $REPO_ID already processed, skipping."
