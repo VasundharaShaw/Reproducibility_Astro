@@ -1,17 +1,19 @@
 """
 pipeline/collect_ads.py
 
-Fetch high-energy astrophysics articles from NASA ADS that mention
-GitHub and Jupyter notebooks, and populate data/db.sqlite directly.
+Fetch astrophysics articles from NASA ADS that mention GitHub and Jupyter
+notebooks, check each repo via the GitHub API for .ipynb files, and populate
+data/db.sqlite directly with only repos confirmed to contain notebooks.
 
 Creates four tables if they don't exist:
     journal      — one row per publication venue
     article      — one row per paper
     author       — one row per author
-    repositories — one row per GitHub repo found (used by run.sh batch mode)
+    repositories — one row per GitHub repo confirmed to have notebooks
 
 Usage:
-    export ADS_API_TOKEN=your_token_here
+    export ADS_API_TOKEN=your_ads_token_here
+    export GITHUB_API_TOKEN=your_github_token_here
     python3 pipeline/collect_ads.py
 
 Or via the wrapper:
@@ -68,10 +70,59 @@ ASTRO_CATEGORIES = [
     "hep-lat",      # high energy physics - lattice
 ]
 
+# ── GitHub API settings ────────────────────────────────────────────────────────
+
+GITHUB_API_TOKEN  = os.environ.get("GITHUB_API_TOKEN", "")
+GITHUB_SEARCH_URL = "https://api.github.com/search/code"
+
+
+def repo_has_notebooks(repo_path):
+    """
+    Query GitHub API to check if a repo contains any .ipynb files.
+    repo_path: e.g. 'owner/repo'
+    Returns True if notebooks found, False otherwise.
+    """
+    if not GITHUB_API_TOKEN:
+        print(f"  [GITHUB] No token set — skipping notebook check for {repo_path}")
+        return True  # fail open: insert repo anyway if no token
+
+    headers = {
+        "Authorization": f"token {GITHUB_API_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+    params = {"q": f"extension:ipynb repo:{repo_path}"}
+
+    try:
+        response = requests.get(GITHUB_SEARCH_URL, headers=headers,
+                                params=params, timeout=15)
+        if response.status_code == 403:
+            # Rate limited — wait and retry once
+            reset_time = int(response.headers.get("X-RateLimit-Reset", time.time() + 60))
+            wait = max(reset_time - int(time.time()), 1)
+            print(f"  [GITHUB] Rate limited — waiting {wait}s...")
+            time.sleep(wait)
+            response = requests.get(GITHUB_SEARCH_URL, headers=headers,
+                                    params=params, timeout=15)
+        if response.status_code == 200:
+            count = response.json().get("total_count", 0)
+            if count > 0:
+                print(f"  [GITHUB] ✓ {repo_path} — {count} notebook(s) found")
+                return True
+            else:
+                print(f"  [GITHUB] ✗ {repo_path} — no notebooks, skipping")
+                return False
+        else:
+            print(f"  [GITHUB] {repo_path} — API error {response.status_code}, skipping")
+            return False
+    except requests.RequestException as e:
+        print(f"  [GITHUB] {repo_path} — request failed: {e}, skipping")
+        return False
+
+
 # ── Database setup ─────────────────────────────────────────────────────────────
 
 def ensure_tables(conn):
-    """Create article/journal/author tables and add article_id to repositories."""
+    """Create all tables including repositories."""
     cur = conn.cursor()
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS journal (
@@ -112,16 +163,18 @@ def ensure_tables(conn):
             email       TEXT,
             FOREIGN KEY (article_id) REFERENCES article(id)
         );
-    """)
 
-    # Add article_id to repositories only if missing
-    cur.execute("PRAGMA table_info(repositories);")
-    if "article_id" not in [row[1] for row in cur.fetchall()]:
-        cur.execute(
-            "ALTER TABLE repositories ADD COLUMN article_id INTEGER "
-            "REFERENCES article(id);"
-        )
-        print("[DB] Added article_id column to repositories.")
+        CREATE TABLE IF NOT EXISTS repositories (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            article_id         INTEGER REFERENCES article(id),
+            domain             TEXT,
+            repository         TEXT,
+            notebooks_count    INTEGER DEFAULT 0,
+            setups_count       INTEGER DEFAULT 0,
+            requirements_count INTEGER DEFAULT 0,
+            processed          INTEGER DEFAULT 0
+        );
+    """)
 
     conn.commit()
     print("[DB] Tables ready: journal, article, author, repositories.")
@@ -266,7 +319,7 @@ def create_article(conn, record, journal_id):
 
 
 def create_authors(conn, record, article_id):
-    cur    = conn.cursor()
+    cur     = conn.cursor()
     authors = record.get("author", [])
     orcids  = record.get("orcid_pub", [])
     rows = []
@@ -285,13 +338,21 @@ def create_authors(conn, record, article_id):
 
 
 def create_repositories(conn, article_id, repo_links):
+    """Insert repos that are confirmed to have notebooks via GitHub API."""
     cur      = conn.cursor()
     inserted = 0
     for url in repo_links:
         repo_path = re.sub(r"https?://github\.com/", "", url)
+
+        # Skip if already in DB
         cur.execute("SELECT id FROM repositories WHERE repository = ?", (repo_path,))
         if cur.fetchone():
             continue
+
+        # Check GitHub API for notebooks before inserting
+        if not repo_has_notebooks(repo_path):
+            continue
+
         cur.execute(
             """INSERT INTO repositories
                    (article_id, domain, repository,
@@ -300,6 +361,9 @@ def create_repositories(conn, article_id, repo_links):
             (article_id, repo_path),
         )
         inserted += 1
+        # Small delay to respect GitHub API rate limits
+        time.sleep(1)
+
     conn.commit()
     return inserted
 
@@ -311,26 +375,27 @@ def get_date_range():
     start = today.replace(year=today.year - 15)
     return start.isoformat(), today.isoformat()
 
-##### Collecting repos that mention both Github and jupyter 
+##### Collecting repos that mention both Github and jupyter
 
 
 def build_query(start_date, end_date):
     category_filter = " OR ".join(f"arxiv_class:{c}" for c in ASTRO_CATEGORIES)
     jupyter_filter  = (
         'abs:"jupyter" OR abs:"ipynb" OR abs:"ipython" OR '
-        'title:"jupyter" OR title:"notebook"'
+        'title:"jupyter" OR title:"notebook" OR '
+        'body:"jupyter" OR body:"ipynb"'
     )
-    github_filter   = 'abs:"github" OR title:"github"'
+    github_filter   = 'abs:"github" OR title:"github" OR body:"github"'
     date_filter     = f"pubdate:[{start_date} TO {end_date}]"
     return (
         f"({jupyter_filter}) AND ({github_filter}) "
         f"AND ({category_filter}) AND {date_filter}"
     )
 
-##### Collecting repos that mention ONLY Github and  NOT jupyter 
+##### Collecting repos that mention ONLY Github and NOT jupyter
 # def build_query(start_date, end_date):
 #     category_filter = " OR ".join(f"arxiv_class:{c}" for c in ASTRO_CATEGORIES)
-#     github_filter   = 'abs:"github" OR title:"github"'
+#     github_filter   = 'abs:"github" OR title:"github" OR body:"github"'
 #     date_filter     = f"pubdate:[{start_date} TO {end_date}]"
 #     return f"({github_filter}) AND ({category_filter}) AND {date_filter}"
 
@@ -377,6 +442,10 @@ def fetch_all_articles(query):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
+    if not GITHUB_API_TOKEN:
+        print("[WARNING] GITHUB_API_TOKEN is not set — repos will be inserted without notebook check.")
+        print("  Run: export GITHUB_API_TOKEN=your_token_here\n")
+
     start_date, end_date = get_date_range()
     print(f"[ADS] Date range: {start_date} to {end_date}\n")
 
@@ -410,7 +479,7 @@ def main():
     print(f"\n[DONE]")
     print(f"  Articles created : {created}")
     print(f"  Articles skipped : {skipped} (already in DB)")
-    print(f"  Repos inserted   : {repos}")
+    print(f"  Repos inserted   : {repos} (confirmed to have notebooks)")
 
 
 if __name__ == "__main__":
