@@ -203,22 +203,7 @@ process_sqlite_flow() {
             not_in_clause="AND r.id NOT IN ($(IFS=,; echo "${processed_repo_ids[*]}"))"
         fi
 
-        # Read repo list from input DB_FILE
-        # Skip repos already present in OUTPUT_DB_FILE repository_runs
-        repo_data=$(sqlite3 "$DB_FILE" <<EOF
-.mode csv
-.headers off
-SELECT r.id, r.repository
-FROM repositories r
-WHERE r.repository NOT IN (
-    SELECT repository FROM repositories
-)
-$not_in_clause
-ORDER BY r.id LIMIT 1;
-EOF
-)
-
-        # Simpler fallback: just get next repo not yet in output DB
+        # Read next repo from input DB_FILE
         repo_data=$(sqlite3 "$DB_FILE" <<EOF
 .mode csv
 .headers off
