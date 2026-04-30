@@ -146,16 +146,18 @@ process_repo() {
     fi
 
     # 4. Check for Python notebooks
-    stats=$(get_notebook_language_stats "$REPO_ID")
-    total_notebooks=$(echo "$stats" | cut -d'|' -f1)
-    python_notebooks=$(echo "$stats" | cut -d'|' -f2)
-    log "[REPO] Notebooks: total=$total_notebooks python=$python_notebooks"
+    # stats=$(get_notebook_language_stats "$REPO_ID")
+    # total_notebooks=$(echo "$stats" | cut -d'|' -f1)
+    # python_notebooks=$(echo "$stats" | cut -d'|' -f2)
+    # log "[REPO] Notebooks: total=$total_notebooks python=$python_notebooks"
 
-    if [ "${python_notebooks:-0}" -eq 0 ]; then
-        finalize_repository_run "$RUN_ID" "NO_PYTHON_NOTEBOOKS" "No Python notebooks found" "$(elapsed_sec "$REPO_START_TIME")"
-        return 0
-    fi
+    # if [ "${python_notebooks:-0}" -eq 0 ]; then
+    #     finalize_repository_run "$RUN_ID" "NO_PYTHON_NOTEBOOKS" "No Python notebooks found" "$(elapsed_sec "$REPO_START_TIME")"
+    #     return 0
+    # fi
 
+    # 4. Log notebook count (language check skipped — assume Python)
+    log "[REPO] Notebooks found: $(echo "$NOTEBOOK_PATHS" | awk -F';' '{print NF}')"
     # 5. Process requirements
     process_requirements
 
