@@ -395,5 +395,5 @@ Supported by the **Jupyter4NFDI** project (DFG 567156310), **find.software** (DF
 ## Contact
 
 - **GitHub Issues**: [open an issue](https://github.com/VasundharaShaw/Reproducibility_Astro/issues)
-- **Email**: sheeba.samuel@informatik.tu-chemnitz.de
-- **Research Group**: [Distributed and Self-organizing Systems, TU Chemnitz](https://vsr.informatik.tu-chemnitz.de/)
+- **Email**: vasundhara.shaw@fiz-karlsruhe.de,sheeba.samuel@informatik.tu-chemnitz.de
+- **Research Group**: [zb-Math, FIZ-Karlsruhe](https://www.fiz-karlsruhe.de/de/bereiche/mathematische-informationsinfrastruktur), [Distributed and Self-organizing Systems, TU Chemnitz](https://vsr.informatik.tu-chemnitz.de/)
