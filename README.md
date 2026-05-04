@@ -1,6 +1,6 @@
-# Containing the Reproducibility Gap
+# Reproducibility_Astro
 
-**Automated Repository-Level Reproducibility Assessment for Scholarly Jupyter Notebooks**
+**Automated Repository-Level Reproducibility Assessment for Astrophysics Jupyter Notebooks**
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -10,18 +10,22 @@
 
 ## Overview
 
-This pipeline automatically clones GitHub repositories containing Jupyter notebooks, re-executes them in isolated Python environments, and measures how reproducible the results are. It is designed to run on the **[NFDI JupyterHub](https://hub.nfdi-jupyter.de)** — no local Docker installation needed.
+This pipeline is adapted from the [CPRMC biomedical reproducibility pipeline](https://github.com/VasundharaShaw/CPRMC_version_Vasu) and targets astrophysics publications. It automatically collects astrophysics papers from NASA ADS that mention GitHub and Jupyter notebooks, verifies that the linked repos contain notebooks via the GitHub API, then clones, executes, and measures the reproducibility of those notebooks in isolated Python environments.
+
+It is designed to run on the **[NFDI JupyterHub](https://hub.nfdi-jupyter.de)** — no local Docker installation needed.
 
 Results are stored in a SQLite database for downstream analysis.
 
 ### What it does
 
-1. **Clones** a GitHub repository containing Jupyter notebooks
-2. **Detects** the required Python version from the repo's metadata
-3. **Creates** an isolated pyenv + venv environment per repository
-4. **Executes** each notebook via `nbconvert`
-5. **Compares** original vs. re-executed outputs
-6. **Stores** cell-level reproducibility scores in a SQLite database
+1. **Collects** astrophysics papers from NASA ADS (last 15 years) mentioning GitHub and Jupyter in title, abstract, or body text
+2. **Verifies** each linked GitHub repo contains `.ipynb` files via the GitHub API before storing
+3. **Clones** confirmed repositories
+4. **Detects** the required Python version from each repo's metadata
+5. **Creates** an isolated pyenv + venv environment per repository
+6. **Executes** each notebook via `nbconvert`
+7. **Compares** original vs. re-executed outputs
+8. **Stores** cell-level reproducibility scores in a SQLite database
 
 ---
 
@@ -30,7 +34,7 @@ Results are stored in a SQLite database for downstream analysis.
 1. Go to [hub.nfdi-jupyter.de](https://hub.nfdi-jupyter.de/hub/home)
 2. Click **Start Server** and choose **Repo2docker (Binder)**
 3. Fill in the form:
-   - **Repository URL**: `https://github.com/VasundharaShaw/CPRPMC_test`
+   - **Repository URL**: `https://github.com/VasundharaShaw/Reproducibility_Astro`
    - **Git ref**: `main`
    - **Flavor**: `4GB RAM, 1 vCPU` (minimum recommended)
 4. Click **Start** — the environment will build automatically
@@ -38,6 +42,9 @@ Results are stored in a SQLite database for downstream analysis.
 
 ```bash
 cd /home/jovyan
+export ADS_API_TOKEN=your_ads_token_here
+export GITHUB_API_TOKEN=your_github_token_here
+bash collect.sh
 bash run.sh
 ```
 
@@ -46,64 +53,109 @@ bash run.sh
 ## Repository Structure
 
 ```
-CPRPMC_test/
-├── run.sh                   # Single entry point — checks deps, launches pipeline
+Reproducibility_Astro/
+├── collect.sh               # Step 1 — collect papers and repos from NASA ADS
+├── run.sh                   # Step 2 — clone, execute, and compare notebooks
 ├── binder/                  # repo2docker configuration
 ├── config/
 │   └── config.sh            # Pipeline configuration (paths, settings)
 ├── data/
-│   └── db.sqlite            # Source database (5241 repositories from Sheeba's study)
+│   └── db.sqlite            # Input database — articles, journals, authors, repos with notebooks
 ├── input/                   # Input repo lists for batch mode
 ├── output/                  # All pipeline outputs (created at runtime)
 │   ├── cloned_repos/        # Cloned repositories
-│   ├── db/                  # Pipeline results database (output/db/db.sqlite)
+│   ├── db/                  # Execution results database (output/db/db.sqlite)
 │   ├── logs/                # Per-repo execution logs
 │   └── comparisons/         # JSON comparison reports
 ├── src/                     # Shell library functions
 │   ├── pyenv.sh             # Python version detection + venv isolation
-│   ├── repo.sh              # Repository cloning and processing
+│   ├── repo.sh              # Repository cloning, notebook discovery, and processing
 │   ├── requirements.sh      # Dependency extraction
 │   ├── notebooks.sh         # Notebook execution and comparison logic
 │   ├── db.sh                # Database operations + schema
 │   ├── checks.sh            # Pre-flight validation
 │   └── logging.sh           # Logging utilities
 ├── pipeline/
-│   └── main.sh              # Main orchestrator
+│   ├── collect_ads.py       # NASA ADS collection + GitHub API notebook check
+│   └── main.sh              # Main pipeline orchestrator
 ├── analysis/
 │   ├── compare_notebook.py  # Output comparison script
 │   ├── analyse_reporesults.ipynb  # Explore results interactively
 │   └── nbprocess/           # Notebook processing utilities
-├── docs/
-│   ├── QUICKSTART.md
-│   └── architecture.md
 └── tests/
     └── test_pipeline.sh     # Smoke test
 ```
 
 ---
 
+## Setup
+
+### Tokens required
+
+| Token | Where to get it |
+|---|---|
+| `ADS_API_TOKEN` | [ui.adsabs.harvard.edu](https://ui.adsabs.harvard.edu) → Account → Settings → API Token |
+| `GITHUB_API_TOKEN` | GitHub → Settings → Developer settings → Personal access tokens |
+
+```bash
+export ADS_API_TOKEN=your_ads_token_here
+export GITHUB_API_TOKEN=your_github_token_here
+```
+
+### Dependencies
+- Python 3
+- SQLite3
+- Git
+- pyenv
+
+---
+
 ## Usage
 
-Run from `/home/jovyan`:
+### Step 1 — Collect papers and repos
+
+```bash
+bash collect.sh
+```
+
+Queries NASA ADS for astrophysics papers (last 15 years) that mention GitHub and Jupyter in their title, abstract, or body text. For each GitHub repo found, queries the GitHub API to confirm `.ipynb` files exist before inserting into `data/db.sqlite`.
+
+### Step 2 — Run the pipeline
 
 ```bash
 bash run.sh
 ```
 
-`run.sh` checks all dependencies first, then launches the pipeline. You will be prompted to choose a mode:
+You will be prompted to choose a mode:
 
-### Mode 1 — Single repository
+#### Mode 1 — Single repository
 
 Enter a GitHub repository URL directly. You will be asked for:
-
 - **GitHub repo URL** — e.g. `https://github.com/example/repo`
 - **Notebook paths** — semicolon-separated paths to `.ipynb` files within the repo
 - **Setup paths** *(optional)* — paths to `setup.py` files
 - **Requirements paths** *(optional)* — paths to `requirements.txt` files
 
-### Mode 2 — Batch mode
+#### Mode 2 — Batch mode
 
-Processes repositories from `data/db.sqlite` (the source database containing 5241 repositories from Sheeba Samuel's original reproducibility study). Results are written to `output/db/db.sqlite` — the source database is never modified.
+Processes repos from `data/db.sqlite` automatically. Results are written to `output/db/db.sqlite` — the input database is never modified.
+
+---
+
+## Subject Categories Covered
+
+| Category | Description |
+|---|---|
+| astro-ph.HE | High energy astrophysical phenomena |
+| astro-ph.GA | Astrophysics of galaxies |
+| astro-ph.CO | Cosmology and nongalactic astrophysics |
+| astro-ph.EP | Earth and planetary astrophysics |
+| astro-ph.IM | Instrumentation and methods for astrophysics |
+| astro-ph.SR | Solar and stellar astrophysics |
+| hep-ex | High energy physics - experiment |
+| hep-ph | High energy physics - phenomenology |
+| hep-th | High energy physics - theory |
+| hep-lat | High energy physics - lattice |
 
 ---
 
@@ -134,20 +186,18 @@ export TARGET_COUNT=20    # Override batch size (default: 10)
 bash run.sh
 ```
 
-See `.env.example` for all available options.
-
 ---
 
-## Database
+## Database Architecture
 
 The pipeline uses two separate SQLite databases:
 
 | Database | Path | Purpose |
 |---|---|---|
-| Source DB | `data/db.sqlite` | Sheeba's original study — 5241 repositories. **Read-only, never modified.** |
-| Output DB | `output/db/db.sqlite` | Created fresh by the pipeline. Stores all execution results. |
+| Input DB | `data/db.sqlite` | Populated by `collect.sh` — articles, journals, authors, repos confirmed to have notebooks. **Never modified by `run.sh`.** |
+| Output DB | `output/db/db.sqlite` | Created by `run.sh` — stores all execution results. |
 
-The output database is created automatically on first run. The following tables are written to `output/db/db.sqlite`:
+### Output database tables
 
 | Table | Description |
 |---|---|
@@ -205,6 +255,6 @@ Supported by the **Jupyter4NFDI** project (DFG 567156310), **find.software** (DF
 
 ## Contact
 
-- **GitHub Issues**: [open an issue](https://github.com/VasundharaShaw/CPRPMC_test/issues)
+- **GitHub Issues**: [open an issue](https://github.com/VasundharaShaw/Reproducibility_Astro/issues)
 - **Email**: sheeba.samuel@informatik.tu-chemnitz.de
 - **Research Group**: [Distributed and Self-organizing Systems, TU Chemnitz](https://vsr.informatik.tu-chemnitz.de/)
