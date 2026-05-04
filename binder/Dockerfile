@@ -37,7 +37,10 @@ RUN python3.10 -m pip install --no-cache-dir --upgrade pip && \
     python3.10 -m pip install --no-cache-dir \
         notebook \
         jupyterlab \
-        nbconvert
+        nbconvert \
+        nbformat \
+        nbdime \
+        requests
 
 # ---------------------------------------------------------------
 # Create jovyan user (matches NFDI expectation)
