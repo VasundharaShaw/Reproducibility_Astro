@@ -39,6 +39,48 @@ This pipeline is designed to answer four research questions about Jupyter notebo
 
 ---
 
+## How the Environment Works (repo2docker + Dockerfile)
+
+This repository uses **[repo2docker](https://repo2docker.readthedocs.io)** to define its compute environment. When you launch this repo on NFDI JupyterHub, repo2docker reads `binder/Dockerfile` and automatically builds a container image from it — no manual setup required on your part.
+
+### What repo2docker does
+
+repo2docker is a tool that converts a repository into a reproducible computational environment. It looks for configuration files in the `binder/` folder (such as a `Dockerfile`, `requirements.txt`, or `environment.yml`) and uses them to build a Docker image. That image becomes the JupyterHub server you work in.
+
+When you paste the GitHub URL into NFDI JupyterHub and click Start, repo2docker:
+1. Clones this repository
+2. Reads `binder/Dockerfile`
+3. Builds a container image with all dependencies pre-installed
+4. Launches JupyterLab inside that container
+
+On first launch this takes a few minutes. Subsequent launches reuse the cached image and are much faster.
+
+### What `binder/Dockerfile` installs
+
+The `binder/Dockerfile` defines the complete runtime environment:
+
+- **Base**: Ubuntu 22.04
+- **System packages**: build tools required by pyenv (`make`, `build-essential`, `libssl-dev`, `zlib1g-dev`, etc.)
+- **Python 3.10**: installed system-wide via apt
+- **Jupyter stack**: `notebook`, `jupyterlab`, `nbconvert`, `nbformat`, `nbdime` — available to all pipeline scripts without manual installation
+- **Pipeline dependencies**: `requests` — used by `collect_ads.py` and `extract_mentions.py`
+- **pyenv**: installed as the `jovyan` user so the pipeline can create per-repository isolated Python environments at run time
+
+Because all of this is baked into the image, you never need to run `pip install` manually after launching on NFDI JupyterHub.
+
+### Why two Python environments?
+
+The pipeline intentionally uses two separate Python contexts:
+
+| Context | What it is | Used for |
+|---|---|---|
+| System Python (Dockerfile) | Python 3.10, installed at image build time | Running `collect.sh`, `mentions.sh`, `compare_notebook.py` |
+| Per-repo venv (pyenv) | Fresh venv created per repository at pipeline run time | Executing each cloned repo's notebooks in isolation |
+
+This separation ensures a repo's dependencies never pollute the pipeline environment, and each repo gets a clean environment that matches its own `requirements.txt`.
+
+---
+
 ## Running on NFDI JupyterHub (recommended)
 
 1. Go to [hub.nfdi-jupyter.de](https://hub.nfdi-jupyter.de/hub/home)
@@ -46,15 +88,16 @@ This pipeline is designed to answer four research questions about Jupyter notebo
 3. Fill in the form:
    - **Repository URL**: `https://github.com/VasundharaShaw/Reproducibility_Astro`
    - **Git ref**: `main`
-   - **Flavor**: `4GB RAM, 1 vCPU` (minimum recommended)
-4. Click **Start** — the environment will build automatically
+   - **Flavor**: `8GB RAM, 2 vCPU` (recommended — the pipeline is memory-intensive)
+4. Click **Start** — repo2docker builds the environment from `binder/Dockerfile` automatically
 5. Once JupyterLab opens, launch a terminal and run:
 
 ```bash
 cd /home/jovyan
 export ADS_API_TOKEN=your_ads_token_here
 bash collect.sh
-bash mentions.sh
+bash mentions.sh --limit 50    # test with 50 articles; remove --limit for full run
+export TARGET_COUNT=5          # process 5 repos at a time to avoid memory limits
 bash run.sh
 ```
 
@@ -67,7 +110,10 @@ Reproducibility_Astro/
 ├── collect.sh               # Step 1 — collect papers from NASA ADS → data/db.sqlite
 ├── mentions.sh              # Step 2 — extract notebook mentions from arXiv LaTeX source
 ├── run.sh                   # Step 3 — clone, execute, and compare notebooks
-├── binder/                  # repo2docker configuration
+├── binder/                  # repo2docker environment definition
+│   ├── Dockerfile           # Full environment spec — Python, Jupyter, pyenv, nbdime
+│   ├── apt.txt              # Additional system packages for pyenv build dependencies
+│   └── postBuild            # Post-build script — configures pyenv PATH
 ├── config/
 │   └── config.sh            # Pipeline configuration (paths, settings)
 ├── data/
@@ -117,10 +163,14 @@ export GITHUB_API_TOKEN=your_github_token_here   # only needed for run.sh
 `mentions.sh` requires no API token — it fetches arXiv source directly.
 
 ### Dependencies
-- Python 3
-- SQLite3
-- Git
-- pyenv
+
+All dependencies are pre-installed by `binder/Dockerfile` when running on NFDI JupyterHub. If running locally outside of JupyterHub:
+
+```bash
+pip install requests nbformat nbdime nbconvert
+```
+
+You also need Python 3.10+, SQLite3, Git, and pyenv installed on your system.
 
 ---
 
@@ -138,6 +188,8 @@ Queries NASA ADS for astrophysics papers (last 5 years) that mention Jupyter not
 
 ```bash
 bash mentions.sh
+# or with a limit for testing:
+bash mentions.sh --limit 10
 ```
 
 For each article in `data/db.sqlite` that has an arXiv ID, fetches the LaTeX source tarball from arXiv and extracts every notebook mention into the `notebook_mentions` table. Captured per mention:
@@ -154,6 +206,9 @@ This step is idempotent — articles already processed are skipped on re-runs. a
 ### Step 3 — Run the pipeline
 
 ```bash
+bash run.sh
+# recommended on JupyterHub to avoid memory limits:
+export TARGET_COUNT=5
 bash run.sh
 ```
 
@@ -227,7 +282,7 @@ Each repository gets its own isolated Python environment via **pyenv + venv**:
 Edit `config/config.sh` or set environment variables before running:
 
 ```bash
-export TARGET_COUNT=20    # Override batch size (default: 10)
+export TARGET_COUNT=5     # Repos per batch (keep low on 4-8GB instances)
 bash run.sh
 ```
 
@@ -257,6 +312,7 @@ The pipeline uses two separate SQLite databases:
 | Table | Description |
 |---|---|
 | `repositories` | Repository metadata (URL, notebook count, requirements, `host_type`) |
+| `notebooks` | Individual notebook records per repository |
 | `repository_runs` | Per-run status, timestamps, duration |
 | `notebook_executions` | Per-notebook execution results and errors |
 | `notebook_reproducibility_metrics` | Cell-level reproducibility scores |
@@ -305,6 +361,19 @@ FROM notebook_executions
 WHERE execution_status NOT IN ('SUCCESS', 'SUCCESS_WITH_ERRORS')
 GROUP BY error_type
 ORDER BY count DESC;
+
+-- Reproducibility score distribution
+SELECT
+    CASE
+        WHEN reproducibility_score = 1.0 THEN 'Perfect (1.0)'
+        WHEN reproducibility_score >= 0.75 THEN 'High (0.75-1.0)'
+        WHEN reproducibility_score >= 0.5  THEN 'Medium (0.5-0.75)'
+        ELSE 'Low (<0.5)'
+    END AS score_band,
+    COUNT(*) AS notebooks
+FROM notebook_reproducibility_metrics
+GROUP BY score_band
+ORDER BY notebooks DESC;
 ```
 
 ---
