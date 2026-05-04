@@ -1,19 +1,27 @@
 """
 pipeline/collect_ads.py
 
-Fetch astrophysics articles from NASA ADS that mention GitHub and Jupyter
-notebooks, check each repo via the GitHub API for .ipynb files, and populate
-data/db.sqlite directly with only repos confirmed to contain notebooks.
+Fetch astrophysics articles from NASA ADS that mention Jupyter notebooks
+(with or without a hosting platform), classify each article by notebook
+category, and populate data/db.sqlite.
+
+Notebook categories (stored in article.notebook_category):
+    jupyter_only             — Jupyter/ipynb indicators, no recognised host
+    jupyter_with_github      — Jupyter/ipynb + GitHub
+    jupyter_with_zenodo      — Jupyter/ipynb + Zenodo
+    jupyter_with_personal    — Jupyter/ipynb + personal/other website
+    jupyter_with_github_zenodo — Jupyter/ipynb + both GitHub and Zenodo
 
 Creates four tables if they don't exist:
-    journal      — one row per publication venue
-    article      — one row per paper
-    author       — one row per author
-    repositories — one row per GitHub repo confirmed to have notebooks
+    journal          — one row per publication venue
+    article          — one row per paper
+    author           — one row per author
+    repositories     — one row per extracted repo/host URL
+    notebook_mentions — one row per in-text notebook mention (populated by
+                        extract_mentions.py, schema created here)
 
 Usage:
     export ADS_API_TOKEN=your_ads_token_here
-    export GITHUB_API_TOKEN=your_github_token_here
     python3 pipeline/collect_ads.py
 
 Or via the wrapper:
@@ -52,8 +60,8 @@ FIELDS = [
     "doi",          #                     → article.doi
     "keyword",      #                     → article.keywords
     "arxiv_class",  # arXiv categories    → article.subject
-    "abstract",     # mined for GitHub links
-    "links_data",   # structured links    → mined for GitHub links
+    "abstract",     # mined for host links
+    "links_data",   # structured links    → mined for host links
     "issn",         #                     → journal.issn_epub
 ]
 
@@ -70,59 +78,18 @@ ASTRO_CATEGORIES = [
     "hep-lat",      # high energy physics - lattice
 ]
 
-# ── GitHub API settings ────────────────────────────────────────────────────────
+# ── Recognised hosting domains ─────────────────────────────────────────────────
 
-GITHUB_API_TOKEN  = os.environ.get("GITHUB_API_TOKEN", "")
-GITHUB_SEARCH_URL = "https://api.github.com/search/code"
-
-
-def repo_has_notebooks(repo_path):
-    """
-    Query GitHub API to check if a repo contains any .ipynb files.
-    repo_path: e.g. 'owner/repo'
-    Returns True if notebooks found, False otherwise.
-    """
-    if not GITHUB_API_TOKEN:
-        print(f"  [GITHUB] No token set — skipping notebook check for {repo_path}")
-        return True  # fail open: insert repo anyway if no token
-
-    headers = {
-        "Authorization": f"token {GITHUB_API_TOKEN}",
-        "Accept": "application/vnd.github.v3+json",
-    }
-    params = {"q": f"extension:ipynb repo:{repo_path}"}
-
-    try:
-        response = requests.get(GITHUB_SEARCH_URL, headers=headers,
-                                params=params, timeout=15)
-        if response.status_code == 403:
-            # Rate limited — wait and retry once
-            reset_time = int(response.headers.get("X-RateLimit-Reset", time.time() + 60))
-            wait = max(reset_time - int(time.time()), 1)
-            print(f"  [GITHUB] Rate limited — waiting {wait}s...")
-            time.sleep(wait)
-            response = requests.get(GITHUB_SEARCH_URL, headers=headers,
-                                    params=params, timeout=15)
-        if response.status_code == 200:
-            count = response.json().get("total_count", 0)
-            if count > 0:
-                print(f"  [GITHUB] ✓ {repo_path} — {count} notebook(s) found")
-                return True
-            else:
-                print(f"  [GITHUB] ✗ {repo_path} — no notebooks, skipping")
-                return False
-        else:
-            print(f"  [GITHUB] {repo_path} — API error {response.status_code}, skipping")
-            return False
-    except requests.RequestException as e:
-        print(f"  [GITHUB] {repo_path} — request failed: {e}, skipping")
-        return False
-
+GITHUB_PATTERNS  = ["github.com", "github.io"]
+ZENODO_PATTERNS  = ["zenodo.org", "zenodo"]
+PERSONAL_DOMAINS = ["gitlab.com", "bitbucket.org", "figshare.com",
+                    "mybinder.org", "binder.", "colab.research.google.com",
+                    "osf.io", "dataverse", "huggingface.co"]
 
 # ── Database setup ─────────────────────────────────────────────────────────────
 
 def ensure_tables(conn):
-    """Create all tables including repositories."""
+    """Create all tables including notebook_mentions."""
     cur = conn.cursor()
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS journal (
@@ -151,6 +118,7 @@ def ensure_tables(conn):
             copyright_statement TEXT,
             keywords            TEXT,
             repositories        TEXT,
+            notebook_category   TEXT,
             FOREIGN KEY (journal_id) REFERENCES journal(id)
         );
 
@@ -169,21 +137,81 @@ def ensure_tables(conn):
             article_id         INTEGER REFERENCES article(id),
             domain             TEXT,
             repository         TEXT,
+            host_type          TEXT,
             notebooks_count    INTEGER DEFAULT 0,
             setups_count       INTEGER DEFAULT 0,
             requirements_count INTEGER DEFAULT 0,
             processed          INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS notebook_mentions (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            article_id    INTEGER NOT NULL,
+            mention_text  TEXT,
+            context       TEXT,
+            section       TEXT,
+            link_form     TEXT,
+            url           TEXT,
+            host          TEXT,
+            created_at    TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (article_id) REFERENCES article(id)
+        );
     """)
-
     conn.commit()
-    print("[DB] Tables ready: journal, article, author, repositories.")
+    print("[DB] Tables ready: journal, article, author, repositories, notebook_mentions.")
 
 
-# ── GitHub link extraction ─────────────────────────────────────────────────────
+# ── Categorisation ─────────────────────────────────────────────────────────────
+
+def classify_notebook_category(record):
+    """
+    Determine notebook_category from the ADS record text (abstract +
+    identifier list + links_data URLs).
+
+    Returns one of:
+        jupyter_only
+        jupyter_with_github
+        jupyter_with_zenodo
+        jupyter_with_personal
+        jupyter_with_github_zenodo
+    """
+    text_blob = " ".join([
+        record.get("abstract", "") or "",
+        " ".join(record.get("identifier", []) or []),
+    ]).lower()
+
+    # Also fold in any URLs from links_data
+    try:
+        entries = record.get("links_data", "") or ""
+        if isinstance(entries, str):
+            entries = json.loads(entries)
+        for entry in entries:
+            if isinstance(entry, dict):
+                text_blob += " " + entry.get("url", "").lower()
+            elif isinstance(entry, str):
+                text_blob += " " + entry.lower()
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    has_github   = any(p in text_blob for p in GITHUB_PATTERNS)
+    has_zenodo   = any(p in text_blob for p in ZENODO_PATTERNS)
+    has_personal = any(p in text_blob for p in PERSONAL_DOMAINS)
+
+    if has_github and has_zenodo:
+        return "jupyter_with_github_zenodo"
+    if has_github:
+        return "jupyter_with_github"
+    if has_zenodo:
+        return "jupyter_with_zenodo"
+    if has_personal:
+        return "jupyter_with_personal"
+    return "jupyter_only"
+
+
+# ── URL extraction helpers ─────────────────────────────────────────────────────
 
 def preprocess_url(url):
-    """Normalise a URL to https://github.com/<owner>/<repo> or return None."""
+    """Normalise a GitHub URL to https://github.com/<owner>/<repo> or return None."""
     url = re.sub(r"[\(\) ]", "", url)
     url = re.sub(r";.*", "", url)
     if re.match(r"(.*)github\.com/(.*)/(.+)", url):
@@ -205,27 +233,51 @@ def preprocess_url(url):
     return None
 
 
-def extract_github_links(record):
-    """Mine all GitHub repo URLs from an ADS record."""
+def detect_host_type(url):
+    """Return a host_type string for a given URL."""
+    url_lower = url.lower()
+    if "github.com" in url_lower or "github.io" in url_lower:
+        return "github"
+    if "zenodo.org" in url_lower:
+        return "zenodo"
+    if "gitlab.com" in url_lower:
+        return "gitlab"
+    if "bitbucket.org" in url_lower:
+        return "bitbucket"
+    if "figshare.com" in url_lower:
+        return "figshare"
+    if "mybinder.org" in url_lower or "binder." in url_lower:
+        return "binder"
+    if "colab.research.google.com" in url_lower:
+        return "colab"
+    if "osf.io" in url_lower:
+        return "osf"
+    if "dataverse" in url_lower:
+        return "dataverse"
+    if "huggingface.co" in url_lower:
+        return "huggingface"
+    return "personal_site"
+
+
+def extract_all_links(record):
+    """
+    Extract all URLs from an ADS record (abstract + links_data + identifiers).
+    Returns list of (url, host_type) tuples, deduplicated.
+    """
     raw = []
 
-    # Abstract text
-    for m in re.findall(r"https?://[^\s\]\)\>\"\']+", record.get("abstract", "") or ""):
-        raw.append(m)
-    for m in re.findall(r"github\.com/[^\s\]\)\>\"\']+", record.get("abstract", "") or ""):
+    abstract = record.get("abstract", "") or ""
+    for m in re.findall(r"https?://[^\s\]\)\>\"\']+", abstract):
         raw.append(m)
 
-    # Structured links_data field
     try:
         entries = record.get("links_data", "") or ""
         if isinstance(entries, str):
             entries = json.loads(entries)
         for entry in entries:
-            # ADS returns links_data as either dicts or raw strings
             if isinstance(entry, dict):
                 url = entry.get("url", "")
             elif isinstance(entry, str):
-                # try to parse as JSON, otherwise treat as raw URL
                 try:
                     entry = json.loads(entry)
                     url = entry.get("url", "") if isinstance(entry, dict) else entry
@@ -233,19 +285,31 @@ def extract_github_links(record):
                     url = entry
             else:
                 continue
-            if "github" in url.lower():
+            if url:
                 raw.append(url)
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # Identifier list
     for ident in record.get("identifier", []):
-        if "github" in ident.lower():
+        if re.match(r"https?://", ident):
             raw.append(ident)
 
-    # Deduplicate and normalise
     seen, result = set(), []
     for url in raw:
+        url = re.sub(r"[\(\) ;]", "", url)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        result.append((url, detect_host_type(url)))
+    return result
+
+
+def extract_github_links(record):
+    """Return normalised GitHub repo URLs only (for repositories table)."""
+    seen, result = set(), []
+    for url, host_type in extract_all_links(record):
+        if host_type != "github":
+            continue
         canonical = preprocess_url(url)
         if canonical and canonical not in seen:
             if re.match(r"https?://github\.com/(.+)/(.+)", canonical):
@@ -283,7 +347,7 @@ def get_or_create_journal(conn, record):
 
 
 def create_article(conn, record, journal_id):
-    """Insert article row. Returns (article_id, repo_links) or None if duplicate."""
+    """Insert article row. Returns (article_id, repo_links, all_links) or None if duplicate."""
     cur    = conn.cursor()
     titles = record.get("title", [])
     title  = titles[0] if titles else None
@@ -294,28 +358,30 @@ def create_article(conn, record, journal_id):
     if cur.fetchone():
         return None
 
-    repo_links   = extract_github_links(record)
-    doi_list     = record.get("doi", [])
-    pubdate      = re.sub(r"-00", "-01", record.get("pubdate", "") or "")
-    keywords     = ";".join(record.get("keyword", []))      or None
-    subject      = ";".join(record.get("arxiv_class", [])) or None
-    repositories = ";".join(repo_links) if repo_links else None
+    repo_links        = extract_github_links(record)
+    all_links         = extract_all_links(record)
+    doi_list          = record.get("doi", [])
+    pubdate           = re.sub(r"-00", "-01", record.get("pubdate", "") or "")
+    keywords          = ";".join(record.get("keyword", []))      or None
+    subject           = ";".join(record.get("arxiv_class", [])) or None
+    repositories_str  = ";".join(repo_links) if repo_links else None
+    notebook_category = classify_notebook_category(record)
 
     cur.execute(
         """INSERT INTO article
                (journal_id, name, pmid, pmc, doi, subject,
-                published_date, keywords, repositories)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                published_date, keywords, repositories, notebook_category)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (journal_id, title,
          record.get("bibcode"),
          extract_arxiv_id(record.get("identifier", [])),
          doi_list[0] if doi_list else None,
-         subject, pubdate, keywords, repositories),
+         subject, pubdate, keywords, repositories_str, notebook_category),
     )
     conn.commit()
     article_id = cur.lastrowid
-    print(f"  [ARTICLE] {title[:75]}")
-    return article_id, repo_links
+    print(f"  [ARTICLE] [{notebook_category}] {title[:70]}")
+    return article_id, repo_links, all_links
 
 
 def create_authors(conn, record, article_id):
@@ -337,32 +403,46 @@ def create_authors(conn, record, article_id):
     conn.commit()
 
 
-def create_repositories(conn, article_id, repo_links):
-    """Insert repos that are confirmed to have notebooks via GitHub API."""
+def create_repositories(conn, article_id, repo_links, all_links):
+    """
+    Insert all extracted URLs into repositories table with host_type.
+    GitHub repos use normalised path; others use the raw URL as repository.
+    No GitHub API check — discovery happens at pipeline run time.
+    """
     cur      = conn.cursor()
     inserted = 0
+
+    # GitHub repos (normalised)
     for url in repo_links:
         repo_path = re.sub(r"https?://github\.com/", "", url)
-
-        # Skip if already in DB
         cur.execute("SELECT id FROM repositories WHERE repository = ?", (repo_path,))
         if cur.fetchone():
             continue
-
-        # Check GitHub API for notebooks before inserting
-        if not repo_has_notebooks(repo_path):
-            continue
-
         cur.execute(
             """INSERT INTO repositories
-                   (article_id, domain, repository,
+                   (article_id, domain, repository, host_type,
                     notebooks_count, setups_count, requirements_count, processed)
-               VALUES (?, 'github.com', ?, 0, 0, 0, 0)""",
+               VALUES (?, 'github.com', ?, 'github', 0, 0, 0, 0)""",
             (article_id, repo_path),
         )
         inserted += 1
-        # Small delay to respect GitHub API rate limits
-        time.sleep(1)
+
+    # Non-GitHub links (zenodo, personal, etc.)
+    for url, host_type in all_links:
+        if host_type == "github":
+            continue  # already handled above
+        domain = urlparse(url).netloc or host_type
+        cur.execute("SELECT id FROM repositories WHERE repository = ?", (url,))
+        if cur.fetchone():
+            continue
+        cur.execute(
+            """INSERT INTO repositories
+                   (article_id, domain, repository, host_type,
+                    notebooks_count, setups_count, requirements_count, processed)
+               VALUES (?, ?, ?, ?, 0, 0, 0, 0)""",
+            (article_id, domain, url, host_type),
+        )
+        inserted += 1
 
     conn.commit()
     return inserted
@@ -372,32 +452,25 @@ def create_repositories(conn, article_id, repo_links):
 
 def get_date_range():
     today = datetime.date.today()
-    start = today.replace(year=today.year - 15)
+    start = today.replace(year=today.year - 5)
     return start.isoformat(), today.isoformat()
-
-##### Collecting repos that mention both Github and jupyter
 
 
 def build_query(start_date, end_date):
     category_filter = " OR ".join(f"arxiv_class:{c}" for c in ASTRO_CATEGORIES)
     jupyter_filter  = (
-        'abs:"jupyter" OR abs:"ipynb" OR abs:"ipython" OR '
-        'title:"jupyter" OR title:"notebook" OR '
-        'body:"jupyter" OR body:"ipynb"'
+        'abs:"jupyter" OR abs:"ipynb" OR abs:".ipynb" OR '
+        'abs:"jupyter notebook" OR abs:"jupyter lab" OR '
+        'title:"jupyter" OR title:"ipynb" OR title:"jupyter notebook" OR '
+        'title:"jupyter lab" OR '
+        'body:"jupyter" OR body:"ipynb" OR body:".ipynb" OR '
+        'body:"jupyter notebook" OR body:"jupyter lab"'
     )
-    github_filter   = 'abs:"github" OR title:"github" OR body:"github"'
-    date_filter     = f"pubdate:[{start_date} TO {end_date}]"
+    date_filter = f"pubdate:[{start_date} TO {end_date}]"
     return (
-        f"({jupyter_filter}) AND ({github_filter}) "
-        f"AND ({category_filter}) AND {date_filter}"
+        f"({jupyter_filter}) AND ({category_filter}) AND {date_filter}"
     )
 
-##### Collecting repos that mention ONLY Github and NOT jupyter
-# def build_query(start_date, end_date):
-#     category_filter = " OR ".join(f"arxiv_class:{c}" for c in ASTRO_CATEGORIES)
-#     github_filter   = 'abs:"github" OR title:"github" OR body:"github"'
-#     date_filter     = f"pubdate:[{start_date} TO {end_date}]"
-#     return f"({github_filter}) AND ({category_filter}) AND {date_filter}"
 
 def fetch_page(query, start, rows):
     if not ADS_API_TOKEN:
@@ -442,10 +515,6 @@ def fetch_all_articles(query):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    if not GITHUB_API_TOKEN:
-        print("[WARNING] GITHUB_API_TOKEN is not set — repos will be inserted without notebook check.")
-        print("  Run: export GITHUB_API_TOKEN=your_token_here\n")
-
     start_date, end_date = get_date_range()
     print(f"[ADS] Date range: {start_date} to {end_date}\n")
 
@@ -462,6 +531,7 @@ def main():
     created  = 0
     skipped  = 0
     repos    = 0
+    category_counts = {}
 
     for record in articles:
         journal_id = get_or_create_journal(conn, record)
@@ -469,17 +539,27 @@ def main():
         if result is None:
             skipped += 1
             continue
-        article_id, repo_links = result
+        article_id, repo_links, all_links = result
         created += 1
+
+        # tally categories
+        cur = conn.cursor()
+        cur.execute("SELECT notebook_category FROM article WHERE id = ?", (article_id,))
+        cat = cur.fetchone()[0]
+        category_counts[cat] = category_counts.get(cat, 0) + 1
+
         create_authors(conn, record, article_id)
-        repos += create_repositories(conn, article_id, repo_links)
+        repos += create_repositories(conn, article_id, repo_links, all_links)
 
     conn.close()
 
     print(f"\n[DONE]")
     print(f"  Articles created : {created}")
     print(f"  Articles skipped : {skipped} (already in DB)")
-    print(f"  Repos inserted   : {repos} (confirmed to have notebooks)")
+    print(f"  Repos/links inserted : {repos}")
+    print(f"\n  Category breakdown:")
+    for cat, count in sorted(category_counts.items()):
+        print(f"    {cat:<35} {count}")
 
 
 if __name__ == "__main__":

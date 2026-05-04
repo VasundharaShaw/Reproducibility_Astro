@@ -65,7 +65,7 @@ detect_python_version() {
     # 4. setup.py / setup.cfg — extract python_requires lower bound
     #    e.g. python_requires=">=3.7" -> 3.7
     if [ -f "$repo_dir/setup.py" ]; then
-        version=$(grep -oP "python_requires\s*=\s*['\"]>=\s*\K[0-9]+\.[0-9]+" "$repo_dir/setup.py" | head -1)
+        version=$(perl -ne 'print "$1\n" if /python_requires\s*=\s*[>=]+\s*([0-9]+\.[0-9]+)/' "$repo_dir/setup.py" | head -1)
         if [ -n "$version" ]; then
             log "[PYENV] Python version from setup.py python_requires: $version" >&2
             echo "$version"
@@ -74,7 +74,7 @@ detect_python_version() {
     fi
 
     if [ -f "$repo_dir/setup.cfg" ]; then
-        version=$(grep -oP "python_requires\s*=\s*>=\s*\K[0-9]+\.[0-9]+" "$repo_dir/setup.cfg" | head -1)
+        version=$(perl -ne 'print "$1\n" if /python_requires\s*=\s*>=\s*([0-9]+\.[0-9]+)/' "$repo_dir/setup.cfg" | head -1)
         if [ -n "$version" ]; then
             log "[PYENV] Python version from setup.cfg python_requires: $version" >&2
             echo "$version"
@@ -367,11 +367,11 @@ analyze_env_error() {
         error_message="Failed to execute notebook"
     elif grep -qi "ModuleNotFoundError" "$log_file"; then
         error_type="MODULE_NOT_FOUND"
-        missing=$(grep -oP "ModuleNotFoundError: No module named ['\"]?\K[^'\" \n]+" "$log_file" | head -1)
+        missing=$(grep "ModuleNotFoundError" "$log_file" | head -1 | sed "s/.*No module named .\([^\047\" ]*\).*/\1/")
         error_message="Missing Python module: ${missing:-unknown}"
     elif grep -qi "ImportError" "$log_file"; then
         error_type="IMPORT_ERROR"
-        error_message=$(grep -oP "ImportError.*" "$log_file" | head -1 | cut -c1-200)
+        error_message=$(grep "ImportError" "$log_file" | head -1 | cut -c1-200)
     elif grep -qi "SyntaxError" "$log_file"; then
         error_type="SYNTAX_ERROR"
         error_message="Python syntax error in notebook"

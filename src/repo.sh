@@ -99,6 +99,15 @@ SET notebooks='$NOTEBOOK_PATHS', notebooks_count=$count
 WHERE id=$repo_id;
 EOF
 
+    # Insert each notebook into the notebooks table so comparison can find it
+    while IFS= read -r nb_path; do
+        [ -z "$nb_path" ] && continue
+        safe_path=$(echo "$nb_path" | sed "s/'/''/g")
+        sqlite3 "$OUTPUT_DB_FILE" "INSERT OR IGNORE INTO notebooks (repository_id, name, language) VALUES ($repo_id, '$safe_path', 'python');"
+    done <<< "$notebooks"
+
+    log "[NOTEBOOK] Inserted $count notebook record(s) into DB."
+
     export NOTEBOOK_PATHS
     return 0
 }
@@ -205,14 +214,18 @@ process_sqlite_flow() {
             not_in_clause="AND r.id NOT IN ($(IFS=,; echo "${processed_repo_ids[*]}"))"
         fi
 
-        # Read next repo from input DB_FILE
-        # WHERE 1=1 ensures the AND in not_in_clause is always valid
+        # Read next repo from input DB_FILE.
+        # Only process git-hosted repos (github). Zenodo and personal sites
+        # are skipped here — they will be handled by a dedicated download
+        # stage added later.
+        # WHERE 1=1 ensures the AND clauses below are always valid.
         repo_data=$(sqlite3 "$DB_FILE" <<EOF
 .mode csv
 .headers off
 SELECT r.id, r.repository
 FROM repositories r
 WHERE 1=1
+  AND (r.host_type = 'github' OR r.host_type IS NULL)
 $not_in_clause
 ORDER BY r.id LIMIT 1;
 EOF
@@ -222,7 +235,13 @@ EOF
 
         IFS=',' read -r INPUT_REPO_ID REPO_PATH <<< "$repo_data"
         REPO_PATH=$(echo "$REPO_PATH" | tr -d '\r\n"')
-        GITHUB_REPO="https://github.com/${REPO_PATH}"
+
+        # Guard: only prepend github.com if it's not already a full URL
+        if [[ "$REPO_PATH" == http* ]]; then
+            GITHUB_REPO="$REPO_PATH"
+        else
+            GITHUB_REPO="https://github.com/${REPO_PATH}"
+        fi
 
         log "[BATCH] Repo $INPUT_REPO_ID: $GITHUB_REPO"
 

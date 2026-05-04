@@ -10,22 +10,32 @@
 
 ## Overview
 
-This pipeline is adapted from the [CPRMC biomedical reproducibility pipeline](https://github.com/VasundharaShaw/CPRMC_version_Vasu) and targets astrophysics publications. It automatically collects astrophysics papers from NASA ADS that mention GitHub and Jupyter notebooks, verifies that the linked repos contain notebooks via the GitHub API, then clones, executes, and measures the reproducibility of those notebooks in isolated Python environments.
+This pipeline is adapted from the [CPRMC biomedical reproducibility pipeline](https://github.com/VasundharaShaw/CPRMC_version_Vasu) and targets astrophysics publications. It collects astrophysics papers from NASA ADS that mention Jupyter notebooks (regardless of hosting platform), extracts full-text mention context from arXiv LaTeX source, then clones, executes, and measures the reproducibility of those notebooks in isolated Python environments.
 
 It is designed to run on the **[NFDI JupyterHub](https://hub.nfdi-jupyter.de)** — no local Docker installation needed.
 
-Results are stored in a SQLite database for downstream analysis.
+Results are stored in two SQLite databases: one for collected article metadata and mention context, one for pipeline execution results.
+
+### Research Questions
+
+This pipeline is designed to answer four research questions about Jupyter notebooks in astrophysics publications:
+
+1. **How are Jupyter notebooks referenced in astronomy publications?** — section, link form, and mention context extracted from full LaTeX source
+2. **How stable are the referenced Jupyter notebooks?** — link health and repo availability over time *(future stage)*
+3. **Where are referenced Jupyter notebooks located or stored?** — hosting platform classification (GitHub, Zenodo, GitLab, personal sites, etc.)
+4. **How do Jupyter notebooks receive links and citations?** — URL vs DOI vs footnote vs plain-text citation mechanics
 
 ### What it does
 
-1. **Collects** astrophysics papers from NASA ADS (last 15 years) mentioning GitHub and Jupyter in title, abstract, or body text
-2. **Verifies** each linked GitHub repo contains `.ipynb` files via the GitHub API before storing
-3. **Clones** confirmed repositories
-4. **Detects** the required Python version from each repo's metadata
-5. **Creates** an isolated pyenv + venv environment per repository
-6. **Executes** each notebook via `nbconvert`
-7. **Compares** original vs. re-executed outputs
-8. **Stores** cell-level reproducibility scores in a SQLite database
+1. **Collects** astrophysics papers from NASA ADS (last 5 years) mentioning Jupyter notebooks in title, abstract, or body text — across any hosting platform
+2. **Classifies** each paper by notebook category based on co-occurring hosting signals
+3. **Fetches** arXiv LaTeX source tarballs and extracts every notebook mention with full context, section, link form, and host
+4. **Clones** GitHub-hosted repositories
+5. **Detects** the required Python version from each repo's metadata
+6. **Creates** an isolated pyenv + venv environment per repository
+7. **Executes** each notebook via `nbconvert`
+8. **Compares** original vs. re-executed outputs
+9. **Stores** cell-level reproducibility scores in a SQLite database
 
 ---
 
@@ -43,8 +53,8 @@ Results are stored in a SQLite database for downstream analysis.
 ```bash
 cd /home/jovyan
 export ADS_API_TOKEN=your_ads_token_here
-export GITHUB_API_TOKEN=your_github_token_here
 bash collect.sh
+bash mentions.sh
 bash run.sh
 ```
 
@@ -54,13 +64,14 @@ bash run.sh
 
 ```
 Reproducibility_Astro/
-├── collect.sh               # Step 1 — collect papers and repos from NASA ADS
-├── run.sh                   # Step 2 — clone, execute, and compare notebooks
+├── collect.sh               # Step 1 — collect papers from NASA ADS → data/db.sqlite
+├── mentions.sh              # Step 2 — extract notebook mentions from arXiv LaTeX source
+├── run.sh                   # Step 3 — clone, execute, and compare notebooks
 ├── binder/                  # repo2docker configuration
 ├── config/
 │   └── config.sh            # Pipeline configuration (paths, settings)
 ├── data/
-│   └── db.sqlite            # Input database — articles, journals, authors, repos with notebooks
+│   └── db.sqlite            # Input DB — articles, journals, authors, repos, mentions
 ├── input/                   # Input repo lists for batch mode
 ├── output/                  # All pipeline outputs (created at runtime)
 │   ├── cloned_repos/        # Cloned repositories
@@ -76,7 +87,8 @@ Reproducibility_Astro/
 │   ├── checks.sh            # Pre-flight validation
 │   └── logging.sh           # Logging utilities
 ├── pipeline/
-│   ├── collect_ads.py       # NASA ADS collection + GitHub API notebook check
+│   ├── collect_ads.py       # NASA ADS collection + article categorisation
+│   ├── extract_mentions.py  # arXiv LaTeX full-text mention extractor
 │   └── main.sh              # Main pipeline orchestrator
 ├── analysis/
 │   ├── compare_notebook.py  # Output comparison script
@@ -92,15 +104,17 @@ Reproducibility_Astro/
 
 ### Tokens required
 
-| Token | Where to get it |
-|---|---|
-| `ADS_API_TOKEN` | [ui.adsabs.harvard.edu](https://ui.adsabs.harvard.edu) → Account → Settings → API Token |
-| `GITHUB_API_TOKEN` | GitHub → Settings → Developer settings → Personal access tokens |
+| Token | Where to get it | Required for |
+|---|---|---|
+| `ADS_API_TOKEN` | [ui.adsabs.harvard.edu](https://ui.adsabs.harvard.edu) → Account → Settings → API Token | `collect.sh` |
+| `GITHUB_API_TOKEN` | GitHub → Settings → Developer settings → Personal access tokens | `run.sh` (batch mode) |
 
 ```bash
 export ADS_API_TOKEN=your_ads_token_here
-export GITHUB_API_TOKEN=your_github_token_here
+export GITHUB_API_TOKEN=your_github_token_here   # only needed for run.sh
 ```
+
+`mentions.sh` requires no API token — it fetches arXiv source directly.
 
 ### Dependencies
 - Python 3
@@ -112,21 +126,38 @@ export GITHUB_API_TOKEN=your_github_token_here
 
 ## Usage
 
-### Step 1 — Collect papers and repos
+### Step 1 — Collect papers
 
 ```bash
 bash collect.sh
 ```
 
-Queries NASA ADS for astrophysics papers (last 15 years) that mention GitHub and Jupyter in their title, abstract, or body text. For each GitHub repo found, queries the GitHub API to confirm `.ipynb` files exist before inserting into `data/db.sqlite`.
+Queries NASA ADS for astrophysics papers (last 5 years) that mention Jupyter notebooks in their title, abstract, or body text. No GitHub filter is applied at collection time — papers are collected regardless of where their notebooks are hosted. Each paper is classified into one of five notebook categories (see below) and written to `data/db.sqlite`.
 
-### Step 2 — Run the pipeline
+### Step 2 — Extract notebook mentions
+
+```bash
+bash mentions.sh
+```
+
+For each article in `data/db.sqlite` that has an arXiv ID, fetches the LaTeX source tarball from arXiv and extracts every notebook mention into the `notebook_mentions` table. Captured per mention:
+
+- **mention_text** — the matched keyword or phrase
+- **context** — ±200 characters of surrounding text
+- **section** — nearest LaTeX section heading (e.g. `Introduction`, `data_availability`, `abstract`)
+- **link_form** — `url`, `doi`, `footnote`, or `plain_text`
+- **url** — the adjacent URL if present
+- **host** — detected hosting platform (`github`, `zenodo`, `gitlab`, `personal_site`, etc.)
+
+This step is idempotent — articles already processed are skipped on re-runs. arXiv requests are rate-limited to 1 per 3 seconds.
+
+### Step 3 — Run the pipeline
 
 ```bash
 bash run.sh
 ```
 
-You will be prompted to choose a mode:
+Processes GitHub-hosted repositories only (Zenodo and personal site entries are reserved for a future download stage). You will be prompted to choose a mode:
 
 #### Mode 1 — Single repository
 
@@ -138,7 +169,21 @@ Enter a GitHub repository URL directly. You will be asked for:
 
 #### Mode 2 — Batch mode
 
-Processes repos from `data/db.sqlite` automatically. Results are written to `output/db/db.sqlite` — the input database is never modified.
+Processes GitHub repos from `data/db.sqlite` automatically. Results are written to `output/db/db.sqlite` — the input database is never modified.
+
+---
+
+## Notebook Categories
+
+Each article is classified at collection time based on what hosting signals co-occur with Jupyter/ipynb indicators. Classification is refined when full-text arXiv source is available.
+
+| Category | Description |
+|---|---|
+| `jupyter_only` | Jupyter/ipynb indicators present; no recognised hosting platform mentioned |
+| `jupyter_with_github` | Jupyter/ipynb + GitHub |
+| `jupyter_with_zenodo` | Jupyter/ipynb + Zenodo |
+| `jupyter_with_personal` | Jupyter/ipynb + personal/other website (GitLab, Binder, OSF, Figshare, etc.) |
+| `jupyter_with_github_zenodo` | Jupyter/ipynb + both GitHub and Zenodo |
 
 ---
 
@@ -194,14 +239,24 @@ The pipeline uses two separate SQLite databases:
 
 | Database | Path | Purpose |
 |---|---|---|
-| Input DB | `data/db.sqlite` | Populated by `collect.sh` — articles, journals, authors, repos confirmed to have notebooks. **Never modified by `run.sh`.** |
-| Output DB | `output/db/db.sqlite` | Created by `run.sh` — stores all execution results. |
+| Input DB | `data/db.sqlite` | Populated by `collect.sh` and `mentions.sh`. Stores articles, journals, authors, repositories, and notebook mentions. **Never modified by `run.sh`.** |
+| Output DB | `output/db/db.sqlite` | Created by `run.sh`. Stores all execution results. |
 
-### Output database tables
+### Input database tables (`data/db.sqlite`)
+
+| Table | Populated by | Description |
+|---|---|---|
+| `journal` | `collect.sh` | One row per publication venue |
+| `article` | `collect.sh` | One row per paper, includes `notebook_category` |
+| `author` | `collect.sh` | One row per author |
+| `repositories` | `collect.sh` | One row per extracted repo/URL, includes `host_type` |
+| `notebook_mentions` | `mentions.sh` | One row per in-text notebook mention with full context |
+
+### Output database tables (`output/db/db.sqlite`)
 
 | Table | Description |
 |---|---|
-| `repositories` | Repository metadata (URL, notebook count, requirements) |
+| `repositories` | Repository metadata (URL, notebook count, requirements, `host_type`) |
 | `repository_runs` | Per-run status, timestamps, duration |
 | `notebook_executions` | Per-notebook execution results and errors |
 | `notebook_reproducibility_metrics` | Cell-level reproducibility scores |
@@ -209,6 +264,33 @@ The pipeline uses two separate SQLite databases:
 ### Example queries
 
 ```sql
+-- How are notebooks referenced? (section breakdown)
+SELECT section, COUNT(*) AS mentions
+FROM notebook_mentions
+WHERE mention_text NOT LIKE '__%__'
+GROUP BY section
+ORDER BY mentions DESC;
+
+-- Link form distribution
+SELECT link_form, COUNT(*) AS count
+FROM notebook_mentions
+WHERE mention_text NOT LIKE '__%__'
+GROUP BY link_form
+ORDER BY count DESC;
+
+-- Hosting platform distribution
+SELECT host, COUNT(*) AS count
+FROM notebook_mentions
+WHERE url IS NOT NULL
+GROUP BY host
+ORDER BY count DESC;
+
+-- Category breakdown
+SELECT notebook_category, COUNT(*) AS papers
+FROM article
+GROUP BY notebook_category
+ORDER BY papers DESC;
+
 -- Repositories with highest average reproducibility score
 SELECT r.repository, AVG(nrm.reproducibility_score) AS avg_score
 FROM repositories r
@@ -223,19 +305,7 @@ FROM notebook_executions
 WHERE execution_status NOT IN ('SUCCESS', 'SUCCESS_WITH_ERRORS')
 GROUP BY error_type
 ORDER BY count DESC;
-
--- Success rate by whether repo had a requirements.txt
-SELECT
-    CASE WHEN requirements IS NOT NULL THEN 'With requirements.txt'
-         ELSE 'Without requirements.txt' END AS req_status,
-    COUNT(*) AS total,
-    SUM(CASE WHEN run_status = 'SUCCESS' THEN 1 ELSE 0 END) AS successful
-FROM repositories r
-JOIN repository_runs rr ON r.id = rr.repository_id
-GROUP BY req_status;
 ```
-
-To explore results interactively, open `analysis/analyse_reporesults.ipynb` in JupyterLab.
 
 ---
 
