@@ -114,8 +114,8 @@ EOF
 
 # -----------------------------------------------------------------------------
 # process_repo()
-# Full per-repo flow: validate → clone → discover notebooks → setup env →
-# run notebooks → compare outputs.
+# Full per-repo flow: validate → clone → discover notebooks → score →
+# setup env → run notebooks → compare outputs.
 # -----------------------------------------------------------------------------
 process_repo() {
     REPO_START_TIME=$(now_sec)
@@ -154,37 +154,32 @@ process_repo() {
         return 0
     fi
 
-    # 4. Check for Python notebooks
-    # stats=$(get_notebook_language_stats "$REPO_ID")
-    # total_notebooks=$(echo "$stats" | cut -d'|' -f1)
-    # python_notebooks=$(echo "$stats" | cut -d'|' -f2)
-    # log "[REPO] Notebooks: total=$total_notebooks python=$python_notebooks"
+    # 4. Score repository (ReproScore: 5 categories, 0–5 each, 25 total)
+    python3 pipeline/score.py --repo-dir "$REPO_DIR" --repo-id "$REPO_ID" --db "$OUTPUT_DB_FILE" \
+        >> "$LOG_FILE" 2>&1
+    log "[REPO] Scoring complete."
 
-    # if [ "${python_notebooks:-0}" -eq 0 ]; then
-    #     finalize_repository_run "$RUN_ID" "NO_PYTHON_NOTEBOOKS" "No Python notebooks found" "$(elapsed_sec "$REPO_START_TIME")"
-    #     return 0
-    # fi
-
-    # 4. Log notebook count (language check skipped — assume Python)
+    # 5. Log notebook count (language check skipped — assume Python)
     log "[REPO] Notebooks found: $(echo "$NOTEBOOK_PATHS" | awk -F';' '{print NF}')"
-    # 5. Process requirements
+
+    # 6. Process requirements
     process_requirements
 
-    # 6. Set up Python environment
+    # 7. Set up Python environment
     REQUIREMENTS_FILE="$REPO_DIR/requirements.txt"
     if ! setup_pyenv_env "$REPO_DIR" "$REQUIREMENTS_FILE" "$SETUP_PATHS"; then
         finalize_repository_run "$RUN_ID" "$ENV_ERROR_TYPE" "$ENV_ERROR_MESSAGE" "$(elapsed_sec "$REPO_START_TIME")"
         cleanup_pyenv_env; return 0
     fi
 
-    # 7. Run notebooks
+    # 8. Run notebooks
     if ! run_in_pyenv_env "$REPO_DIR"; then
         analyze_env_error "$LOG_FILE"
         finalize_repository_run "$RUN_ID" "$ENV_ERROR_TYPE" "$ENV_ERROR_MESSAGE" "$(elapsed_sec "$REPO_START_TIME")"
         cleanup_pyenv_env; return 0
     fi
 
-    # 8. Compare outputs
+    # 9. Compare outputs
     NOTEBOOKS_COUNT=$(echo "$NOTEBOOK_PATHS" | awk -F';' '{print NF}')
     export NOTEBOOKS_COUNT
     compare_notebook_outputs
