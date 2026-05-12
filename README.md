@@ -10,11 +10,11 @@
 
 ## Overview
 
-This pipeline is adapted from the [CPRMC biomedical reproducibility pipeline](https://github.com/VasundharaShaw/CPRMC_version_Vasu) and targets astrophysics publications. It collects astrophysics papers from NASA ADS that mention Jupyter notebooks (regardless of hosting platform), extracts full-text mention context from arXiv LaTeX source, then clones, executes, and measures the reproducibility of those notebooks in isolated Python environments.
+This pipeline is adapted from the [CPRMC biomedical reproducibility pipeline](https://github.com/VasundharaShaw/CPRMC_version_Vasu) and targets astrophysics publications. It collects astrophysics papers from NASA ADS that mention Jupyter notebooks (regardless of hosting platform), extracts full-text mention context from arXiv LaTeX source, then clones, scores, executes, and measures the reproducibility of those notebooks in isolated Python environments.
 
 It is designed to run on the **[NFDI JupyterHub](https://hub.nfdi-jupyter.de)** — no local Docker installation needed.
 
-Results are stored in two SQLite databases: one for collected article metadata and mention context, one for pipeline execution results.
+Results are stored in two SQLite databases: one for collected article metadata and mention context, one for pipeline execution results including ReproScore readiness scores.
 
 ### Research Questions
 
@@ -31,53 +31,28 @@ This pipeline is designed to answer four research questions about Jupyter notebo
 2. **Classifies** each paper by notebook category based on co-occurring hosting signals
 3. **Fetches** arXiv LaTeX source tarballs and extracts every notebook mention with full context, section, link form, and host
 4. **Clones** GitHub-hosted repositories
-5. **Detects** the required Python version from each repo's metadata
-6. **Creates** an isolated pyenv + venv environment per repository
-7. **Executes** each notebook via `nbconvert`
-8. **Compares** original vs. re-executed outputs
-9. **Stores** cell-level reproducibility scores in a SQLite database
+5. **Scores** each repository using ReproScore (5 categories, 0–25 scale)
+6. **Detects** the required Python version from each repo's metadata
+7. **Creates** an isolated pyenv + venv environment per repository
+8. **Executes** each notebook via `nbconvert`
+9. **Compares** original vs. re-executed outputs
+10. **Stores** cell-level reproducibility scores and ReproScore readiness scores in a SQLite database
 
 ---
 
-## How the Environment Works (repo2docker + Dockerfile)
+## ReproScore — Repository Readiness Scoring
 
-This repository uses **[repo2docker](https://repo2docker.readthedocs.io)** to define its compute environment. When you launch this repo on NFDI JupyterHub, repo2docker reads `binder/Dockerfile` and automatically builds a container image from it — no manual setup required on your part.
+Each cloned repository is scored across five categories (0–5 points each, 25 total) before notebook execution begins. This measures *readiness* — static, file-based indicators of reproducibility — independent of whether the notebooks actually run.
 
-### What repo2docker does
-
-repo2docker is a tool that converts a repository into a reproducible computational environment. It looks for configuration files in the `binder/` folder (such as a `Dockerfile`, `requirements.txt`, or `environment.yml`) and uses them to build a Docker image. That image becomes the JupyterHub server you work in.
-
-When you paste the GitHub URL into NFDI JupyterHub and click Start, repo2docker:
-1. Clones this repository
-2. Reads `binder/Dockerfile`
-3. Builds a container image with all dependencies pre-installed
-4. Launches JupyterLab inside that container
-
-On first launch this takes a few minutes. Subsequent launches reuse the cached image and are much faster.
-
-### What `binder/Dockerfile` installs
-
-The `binder/Dockerfile` defines the complete runtime environment:
-
-- **Base**: Ubuntu 22.04
-- **System packages**: build tools required by pyenv (`make`, `build-essential`, `libssl-dev`, `zlib1g-dev`, etc.)
-- **Python 3.10**: installed system-wide via apt
-- **Jupyter stack**: `notebook`, `jupyterlab`, `nbconvert`, `nbformat`, `nbdime` — available to all pipeline scripts without manual installation
-- **Pipeline dependencies**: `requests` — used by `collect_ads.py` and `extract_mentions.py`
-- **pyenv**: installed as the `jovyan` user so the pipeline can create per-repository isolated Python environments at run time
-
-Because all of this is baked into the image, you never need to run `pip install` manually after launching on NFDI JupyterHub.
-
-### Why two Python environments?
-
-The pipeline intentionally uses two separate Python contexts:
-
-| Context | What it is | Used for |
+| Category | Column | What earns points |
 |---|---|---|
-| System Python (Dockerfile) | Python 3.10, installed at image build time | Running `collect.sh`, `mentions.sh`, `compare_notebook.py` |
-| Per-repo venv (pyenv) | Fresh venv created per repository at pipeline run time | Executing each cloned repo's notebooks in isolation |
+| **Environment specification** | `score_env` | `requirements.txt` (+1), `environment.yml` (+2), `Dockerfile` (+2), `setup.py`/`setup.cfg`/`pyproject.toml` (+1) |
+| **Data accessibility** | `score_data` | Zenodo/DOI links in README or notebooks (+2), `/data` directory (+1), download scripts (+1), data-level README/LICENSE (+1) |
+| **Documentation** | `score_docs` | README present (+1), README > 500 chars (+1), README > 2000 chars (+1), notebooks have markdown cells (+1), avg ≥ 3 markdown cells per notebook (+1) |
+| **Code quality** | `score_code` | No excessive empty cells (+1), functions defined (+1), no bare `except:` clauses (+1), no error outputs in last cell (+1), organised layout (+1) |
+| **Reproducibility signals** | `score_repro` | CI configured (+2), random seeds pinned (+1), test suite present (+1), Zenodo/Binder badge in README (+1) |
 
-This separation ensures a repo's dependencies never pollute the pipeline environment, and each repo gets a clean environment that matches its own `requirements.txt`.
+Scoring happens automatically during `run.sh` after notebook discovery and before environment setup. Scores are stored as columns on the `repositories` table in the output database.
 
 ---
 
@@ -97,7 +72,7 @@ cd /home/jovyan
 export ADS_API_TOKEN=your_ads_token_here
 bash collect.sh
 bash mentions.sh --limit 50    # test with 50 articles; remove --limit for full run
-export TARGET_COUNT=5          # process 5 repos at a time to avoid memory limits
+export TARGET_COUNT=5           # process 5 repos at a time to avoid memory limits
 bash run.sh
 ```
 
@@ -109,7 +84,7 @@ bash run.sh
 Reproducibility_Astro/
 ├── collect.sh               # Step 1 — collect papers from NASA ADS → data/db.sqlite
 ├── mentions.sh              # Step 2 — extract notebook mentions from arXiv LaTeX source
-├── run.sh                   # Step 3 — clone, execute, and compare notebooks
+├── run.sh                   # Step 3 — clone, score, execute, and compare notebooks
 ├── binder/                  # repo2docker environment definition
 │   ├── Dockerfile           # Full environment spec — Python, Jupyter, pyenv, nbdime
 │   ├── apt.txt              # Additional system packages for pyenv build dependencies
@@ -126,20 +101,21 @@ Reproducibility_Astro/
 │   └── comparisons/         # JSON comparison reports
 ├── src/                     # Shell library functions
 │   ├── pyenv.sh             # Python version detection + venv isolation
-│   ├── repo.sh              # Repository cloning, notebook discovery, and processing
+│   ├── repo.sh              # Repository cloning, notebook discovery, scoring, and processing
 │   ├── requirements.sh      # Dependency extraction
 │   ├── notebooks.sh         # Notebook execution and comparison logic
-│   ├── db.sh                # Database operations + schema
+│   ├── db.sh                # Database operations + schema (incl. ReproScore columns)
 │   ├── checks.sh            # Pre-flight validation
 │   └── logging.sh           # Logging utilities
 ├── pipeline/
 │   ├── collect_ads.py       # NASA ADS collection + article categorisation
 │   ├── extract_mentions.py  # arXiv LaTeX full-text mention extractor
+│   ├── score.py             # ReproScore — 5-category repository readiness scoring
 │   └── main.sh              # Main pipeline orchestrator
 ├── analysis/
 │   ├── compare_notebook.py  # Output comparison script
 │   ├── analyse_reporesults.ipynb  # Explore results interactively
-│   └── nbprocess/           # Notebook processing utilities
+│   └── nbprocess/           # Notebook processing utilities (diff, summary, outputs)
 └── tests/
     └── test_pipeline.sh     # Smoke test
 ```
@@ -164,7 +140,7 @@ export GITHUB_API_TOKEN=your_github_token_here   # only needed for run.sh
 
 ### Dependencies
 
-All dependencies are pre-installed by `binder/Dockerfile` when running on NFDI JupyterHub. If running locally outside of JupyterHub:
+All dependencies are pre-installed by `binder/Dockerfile` when running on NFDI JupyterHub. If running locally:
 
 ```bash
 pip install requests nbformat nbdime nbconvert
@@ -182,7 +158,7 @@ You also need Python 3.10+, SQLite3, Git, and pyenv installed on your system.
 bash collect.sh
 ```
 
-Queries NASA ADS for astrophysics papers (last 5 years) that mention Jupyter notebooks in their title, abstract, or body text. No GitHub filter is applied at collection time — papers are collected regardless of where their notebooks are hosted. Each paper is classified into one of five notebook categories (see below) and written to `data/db.sqlite`.
+Queries NASA ADS for astrophysics papers (last 5 years) that mention Jupyter notebooks in their title, abstract, or body text. Each paper is classified into a notebook category and written to `data/db.sqlite`.
 
 ### Step 2 — Extract notebook mentions
 
@@ -192,45 +168,22 @@ bash mentions.sh
 bash mentions.sh --limit 10
 ```
 
-For each article in `data/db.sqlite` that has an arXiv ID, fetches the LaTeX source tarball from arXiv and extracts every notebook mention into the `notebook_mentions` table. Captured per mention:
-
-- **mention_text** — the matched keyword or phrase
-- **context** — ±200 characters of surrounding text
-- **section** — nearest LaTeX section heading (e.g. `Introduction`, `data_availability`, `abstract`)
-- **link_form** — `url`, `doi`, `footnote`, or `plain_text`
-- **url** — the adjacent URL if present
-- **host** — detected hosting platform (`github`, `zenodo`, `gitlab`, `personal_site`, etc.)
-
-This step is idempotent — articles already processed are skipped on re-runs. arXiv requests are rate-limited to 1 per 3 seconds.
+For each article with an arXiv ID, fetches the LaTeX source tarball and extracts every notebook mention into the `notebook_mentions` table. This step is idempotent — articles already processed are skipped on re-runs. arXiv requests are rate-limited to 1 per 3 seconds.
 
 ### Step 3 — Run the pipeline
 
 ```bash
-bash run.sh
-# recommended on JupyterHub to avoid memory limits:
 export TARGET_COUNT=5
 bash run.sh
 ```
 
-Processes GitHub-hosted repositories only (Zenodo and personal site entries are reserved for a future download stage). You will be prompted to choose a mode:
-
-#### Mode 1 — Single repository
-
-Enter a GitHub repository URL directly. You will be asked for:
-- **GitHub repo URL** — e.g. `https://github.com/example/repo`
-- **Notebook paths** — semicolon-separated paths to `.ipynb` files within the repo
-- **Setup paths** *(optional)* — paths to `setup.py` files
-- **Requirements paths** *(optional)* — paths to `requirements.txt` files
-
-#### Mode 2 — Batch mode
-
-Processes GitHub repos from `data/db.sqlite` automatically. Results are written to `output/db/db.sqlite` — the input database is never modified.
+Processes GitHub-hosted repositories. For each repo, the pipeline clones it, scores it with ReproScore, sets up an isolated Python environment, executes all notebooks, and compares outputs. Choose batch mode (option 2) to process repos from the database automatically.
 
 ---
 
 ## Notebook Categories
 
-Each article is classified at collection time based on what hosting signals co-occur with Jupyter/ipynb indicators. Classification is refined when full-text arXiv source is available.
+Each article is classified at collection time based on hosting signals that co-occur with Jupyter/ipynb indicators.
 
 | Category | Description |
 |---|---|
@@ -252,39 +205,10 @@ Each article is classified at collection time based on what hosting signals co-o
 | astro-ph.EP | Earth and planetary astrophysics |
 | astro-ph.IM | Instrumentation and methods for astrophysics |
 | astro-ph.SR | Solar and stellar astrophysics |
-| hep-ex | High energy physics - experiment |
-| hep-ph | High energy physics - phenomenology |
-| hep-th | High energy physics - theory |
-| hep-lat | High energy physics - lattice |
-
----
-
-## How Environment Isolation Works
-
-Each repository gets its own isolated Python environment via **pyenv + venv**:
-
-1. Detects the required Python version by checking (in order):
-   - `binder/runtime.txt`
-   - `runtime.txt`
-   - `.python-version`
-   - `setup.py` / `setup.cfg` `python_requires` field
-   - Falls back to Python 3.10
-2. Installs that Python version via pyenv if not already present
-3. Creates a fresh virtual environment under `~/.repo_venvs/<repo-name>/`
-4. Installs the repo's dependencies into the venv
-5. Executes all notebooks inside the venv
-6. Cleans up the venv after execution
-
----
-
-## Configuration
-
-Edit `config/config.sh` or set environment variables before running:
-
-```bash
-export TARGET_COUNT=5     # Repos per batch (keep low on 4-8GB instances)
-bash run.sh
-```
+| hep-ex | High energy physics — experiment |
+| hep-ph | High energy physics — phenomenology |
+| hep-th | High energy physics — theory |
+| hep-lat | High energy physics — lattice |
 
 ---
 
@@ -294,8 +218,8 @@ The pipeline uses two separate SQLite databases:
 
 | Database | Path | Purpose |
 |---|---|---|
-| Input DB | `data/db.sqlite` | Populated by `collect.sh` and `mentions.sh`. Stores articles, journals, authors, repositories, and notebook mentions. **Never modified by `run.sh`.** |
-| Output DB | `output/db/db.sqlite` | Created by `run.sh`. Stores all execution results. |
+| Input DB | `data/db.sqlite` | Populated by `collect.sh` and `mentions.sh`. **Never modified by `run.sh`.** |
+| Output DB | `output/db/db.sqlite` | Created by `run.sh`. Stores all execution results and ReproScore scores. |
 
 ### Input database tables (`data/db.sqlite`)
 
@@ -311,7 +235,7 @@ The pipeline uses two separate SQLite databases:
 
 | Table | Description |
 |---|---|
-| `repositories` | Repository metadata (URL, notebook count, requirements, `host_type`) |
+| `repositories` | Repository metadata, notebook count, requirements, `host_type`, and ReproScore columns (`score_env`, `score_data`, `score_docs`, `score_code`, `score_repro`, `score_total`) |
 | `notebooks` | Individual notebook records per repository |
 | `repository_runs` | Per-run status, timestamps, duration |
 | `notebook_executions` | Per-notebook execution results and errors |
@@ -320,19 +244,30 @@ The pipeline uses two separate SQLite databases:
 ### Example queries
 
 ```sql
+-- ReproScore distribution across all scored repositories
+SELECT score_total, COUNT(*) AS repos
+FROM repositories
+WHERE score_total IS NOT NULL
+GROUP BY score_total
+ORDER BY score_total DESC;
+
+-- Average score by category
+SELECT
+    ROUND(AVG(score_env), 1) AS avg_env,
+    ROUND(AVG(score_data), 1) AS avg_data,
+    ROUND(AVG(score_docs), 1) AS avg_docs,
+    ROUND(AVG(score_code), 1) AS avg_code,
+    ROUND(AVG(score_repro), 1) AS avg_repro,
+    ROUND(AVG(score_total), 1) AS avg_total
+FROM repositories
+WHERE score_total IS NOT NULL;
+
 -- How are notebooks referenced? (section breakdown)
 SELECT section, COUNT(*) AS mentions
 FROM notebook_mentions
 WHERE mention_text NOT LIKE '__%__'
 GROUP BY section
 ORDER BY mentions DESC;
-
--- Link form distribution
-SELECT link_form, COUNT(*) AS count
-FROM notebook_mentions
-WHERE mention_text NOT LIKE '__%__'
-GROUP BY link_form
-ORDER BY count DESC;
 
 -- Hosting platform distribution
 SELECT host, COUNT(*) AS count
@@ -361,19 +296,6 @@ FROM notebook_executions
 WHERE execution_status NOT IN ('SUCCESS', 'SUCCESS_WITH_ERRORS')
 GROUP BY error_type
 ORDER BY count DESC;
-
--- Reproducibility score distribution
-SELECT
-    CASE
-        WHEN reproducibility_score = 1.0 THEN 'Perfect (1.0)'
-        WHEN reproducibility_score >= 0.75 THEN 'High (0.75-1.0)'
-        WHEN reproducibility_score >= 0.5  THEN 'Medium (0.5-0.75)'
-        ELSE 'Low (<0.5)'
-    END AS score_band,
-    COUNT(*) AS notebooks
-FROM notebook_reproducibility_metrics
-GROUP BY score_band
-ORDER BY notebooks DESC;
 ```
 
 ---
@@ -395,5 +317,5 @@ Supported by the **Jupyter4NFDI** project (DFG 567156310), **find.software** (DF
 ## Contact
 
 - **GitHub Issues**: [open an issue](https://github.com/VasundharaShaw/Reproducibility_Astro/issues)
-- **Email**: vasundhara.shaw@fiz-karlsruhe.de,sheeba.samuel@informatik.tu-chemnitz.de
+- **Email**: vasundhara.shaw@fiz-karlsruhe.de, sheeba.samuel@informatik.tu-chemnitz.de
 - **Research Group**: [zb-Math, FIZ-Karlsruhe](https://www.fiz-karlsruhe.de/de/bereiche/mathematische-informationsinfrastruktur), [Distributed and Self-organizing Systems, TU Chemnitz](https://vsr.informatik.tu-chemnitz.de/)
