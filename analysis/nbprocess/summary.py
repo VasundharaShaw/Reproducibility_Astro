@@ -3,10 +3,13 @@ Reproducibility Assessment Module
 
 Create summary for the reproducibility assessment module
 
-Author: Sheeba Samuel <sheeba.samuel@informatik.tu-chemnitz.de>
+Original Author: Sheeba Samuel <sheeba.samuel@informatik.tu-chemnitz.de>
 Institution: Chemnitz University of Technology
-License: GPL-3.0 license
 Repository: https://github.com/Sheeba-Samuel/computational-reproducibility-pmc-docker
+
+Adapted for astrophysics by: Vasundhara Shaw
+Repository: https://github.com/VasundharaShaw/Reproducibility_Astro
+License: GPL-3.0 license
 """
 
 import sqlite3
@@ -24,21 +27,20 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 IGNORE_FIELDS = {"execution_count", "metadata"}
 
-DB_FILE = os.environ.get("DB_FILE")
+OUTPUT_DB_FILE = os.environ.get("OUTPUT_DB_FILE")
 REPO_TOTAL_TIME = float(os.getenv("REPO_TOTAL_TIME", 0))
 GITHUB_REPO = os.environ.get("GITHUB_REPO")
 NOTEBOOKS_COUNT = os.environ.get("NOTEBOOKS_COUNT")
-#EXEC_LOG_PATH = Path("logs/notebook_execution_times.log")
 EXEC_LOG_PATH = Path(os.environ.get("LOG_DIR", "")) / "notebook_execution_times.log"
 RUN_ID = int(os.environ.get("RUN_ID"))
 
-if not DB_FILE:
+if not OUTPUT_DB_FILE:
     raise RuntimeError(
-        "DB_FILE environment variable is not set. "
-        "Make sure main.sh exports DB_FILE before running Python."
+        "OUTPUT_DB_FILE environment variable is not set. "
+        "Make sure main.sh exports OUTPUT_DB_FILE before running Python."
     )
 
-DB_FILE = Path(DB_FILE)
+OUTPUT_DB_FILE = Path(OUTPUT_DB_FILE)
 
 
 def compare_old_vs_new(old_row, new_summary):
@@ -53,33 +55,24 @@ def compare_old_vs_new(old_row, new_summary):
         old_diff_count,
         old_notebook_execution_duration,
     ) = old_row
-    # logging.info(
-    #     "Delta calc — old: %r (%s), new: %r (%s)",
-    #     old_notebook_execution_duration,
-    #     type(old_notebook_execution_duration),
-    #     new_summary["notebook_execution_duration"],
-    #     type(new_summary["notebook_execution_duration"]),
-    # )
-
 
     return {
         "delta_total_code_cells": new_summary["total_code_cells"] - (old_total or 0),
         "delta_different_cells_count": new_summary["different_cells_count"] - (old_diff_count or 0),
         "delta_duration": (
             round(
-                (new_summary["notebook_execution_duration"] if new_summary["notebook_execution_duration"] is not None else 0) - 
+                (new_summary["notebook_execution_duration"] if new_summary["notebook_execution_duration"] is not None else 0) -
                 (old_notebook_execution_duration if old_notebook_execution_duration is not None else 0),
                 2
             )
         )
-        #"delta_notebooks_count": NOTEBOOKS_COUNT - (old_notebooks_count or 0),
     }
 
 
 def insert_notebook_execution(summary, repository_run_id):
-    logging.info("insert_notebook_execution summary: %s.", summary)    
-    logging.info("insert_notebook_execution repository_run_id: %s.", repository_run_id) 
-    conn = sqlite3.connect(DB_FILE)
+    logging.info("insert_notebook_execution summary: %s.", summary)
+    logging.info("insert_notebook_execution repository_run_id: %s.", repository_run_id)
+    conn = sqlite3.connect(OUTPUT_DB_FILE)
     cur = conn.cursor()
 
     notebook_name = summary["notebook"]
@@ -96,7 +89,7 @@ def insert_notebook_execution(summary, repository_run_id):
     else:
         notebook_id = None
         repository_id = None
-    
+
     logging.info("notebook_id: %s.", notebook_id)
     logging.info("repository_id: %s.", repository_id)
     logging.info("GITHUB_REPO: %s.", GITHUB_REPO)
@@ -142,15 +135,12 @@ def insert_notebook_execution(summary, repository_run_id):
 
     notebook_execution_id = cur.lastrowid
 
-
-    # 🔎 Fetch previous execution
+    # Fetch previous execution
     old_exec = fetch_previous_execution(
         conn,
         repository_id,
         notebook_id
     )
-
-    #comparison = compare_old_vs_new(old_exec, summary)
 
     insert_notebook_reproducibility_metrics(
         conn,
@@ -224,7 +214,6 @@ def insert_notebook_reproducibility_metrics(
     logging.info("insert_notebook_reproducibility_metrics notebook_execution_id: %s.", notebook_execution_id)
     logging.info("insert_notebook_reproducibility_metrics repository_id: %s.", repository_id)
     logging.info("insert_notebook_reproducibility_metrics notebook_id: %s.", notebook_id)
-    # reproducibility_status = classify_reproducibility(summary)
 
     cur.execute(
         """
@@ -256,7 +245,7 @@ def insert_notebook_reproducibility_metrics(
             summary["same_cells"],
             summary["different_cells"],
             summary["nondeterministic_cells"],
-            summary["reproducibility_score"]                    
+            summary["reproducibility_score"]
         ),
     )
 
@@ -294,7 +283,6 @@ def load_execution_log(log_path=EXEC_LOG_PATH):
         }
     }
     """
-    #log_path = Path(log_dir) / "notebook_execution_times.log"
     execution_log = {}
 
     if not log_path.exists():
@@ -322,7 +310,7 @@ def load_notebook_durations(log_path=EXEC_LOG_PATH):
     for the given notebook name.
     """
     durations = {}
-    if not os.path.exists(log_path):        
+    if not os.path.exists(log_path):
         return durations
 
     with open(log_path) as f:
@@ -407,13 +395,8 @@ def sanitize_error_message(msg: str, max_len: int = 500):
 
 
 def build_detailed_summary(diff, notebook, notebook_name, repo_id):
-    #logging.info("notebook_name: %s", notebook_name)
-    #logging.info("repo_id: %s", repo_id)
-
-
     execution_log = load_execution_log()
-    #logging.info("execution_log: %s", execution_log)
-    
+
     code_cell_indices = [
         i for i, cell in enumerate(notebook.cells)
         if cell.cell_type == "code"
@@ -468,10 +451,7 @@ def build_detailed_summary(diff, notebook, notebook_name, repo_id):
                 different_cell_indices.add(cell_index)
 
     same_cells = sorted(set(code_cell_indices) - different_cell_indices)
-    #durations = load_notebook_durations()
-    #logging.info("durations: %s.", durations)
 
-    
     exec_info = execution_log.get(notebook_name, {})
 
     execution_status = exec_info.get("status", "UNKNOWN")
@@ -486,7 +466,7 @@ def build_detailed_summary(diff, notebook, notebook_name, repo_id):
     error_message = None
     error_cell_index = None
 
-        # Case 1: Execution failed entirely (from execution log)
+    # Case 1: Execution failed entirely (from execution log)
     if execution_status == "FAIL":
         error_category = "ERROR"
 
@@ -503,13 +483,13 @@ def build_detailed_summary(diff, notebook, notebook_name, repo_id):
         # Ensure correct status
         if execution_status != "FAIL":
             execution_status = "SUCCESS_WITH_ERRORS"
-        
+
 
     identical_cells = same_cells
     different_cells_list = list(different_cell_indices)
 
-    executed_cells = len(identical_cells) + len(different_cells_list)    
-    
+    executed_cells = len(identical_cells) + len(different_cells_list)
+
 
     summary = {
         "repository_id": repo_id,
@@ -533,39 +513,13 @@ def build_detailed_summary(diff, notebook, notebook_name, repo_id):
         "reproducibility_score": round(
             len(identical_cells) / total_code_cells if total_code_cells else 1.0,
             3,
-        ),        
+        ),
         "error_type": error_type,
         "error_category": error_category,
         "error_message": error_message,
         "error_cell_index": error_cell_index,
         "error_count": error_count
     }
-
-
-
-    # summary = {
-    #     "repository_id": repo_id,
-    #     "notebook": notebook_name,
-    #     "url": GITHUB_REPO,
-    #     "total_code_cells": total_code_cells,
-    #     "same_cells_count": len(same_cells),
-    #     "different_cells_count": len(different_cell_indices),
-    #     "same_cells": ",".join(map(str, same_cells)),
-    #     "different_cells": ",".join(map(str, different_cell_indices)),
-    #     "nondeterministic_cells": ",".join(map(str, nondeterministic_cells)),
-    #     "execution_status": execution_status,
-    #     "error_type": error_type,
-    #     "error_category": error_category,
-    #     "error_message": error_message,
-    #     "error_cell_index": error_cell_index,
-    #     "error_count": error_count,
-    #     "notebook_execution_duration": notebook_duration,
-    #     "repo_execution_duration": REPO_TOTAL_TIME,
-    #     "notebooks_count": NOTEBOOKS_COUNT,
-    #     "reproducibility_score": round(
-    #         len(same_cells) / total_code_cells if total_code_cells else 1.0, 3
-    #     ),
-    # }
 
     # Handle failed execution
     if execution_status == "EXEC_FAIL":
@@ -578,7 +532,7 @@ def build_detailed_summary(diff, notebook, notebook_name, repo_id):
             "nondeterministic_cells": "",
             "reproducibility_score": 0.0,
         })
-        
+
     # Normal successful case
     insert_notebook_execution(summary, RUN_ID)
     return summary
