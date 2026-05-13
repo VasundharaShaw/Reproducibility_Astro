@@ -1,0 +1,20 @@
+# 1. Set your API token
+export ADS_API_TOKEN=your_token_here
+
+# 2. Collect papers (run once, do not retry if it fails — wait an hour)
+bash collect.sh
+
+# 3. Extract notebook mentions (limit 5)
+bash mentions.sh --limit 5
+
+# 4. Run the pipeline on 5 repos
+export TARGET_COUNT=5
+echo "2" | bash run.sh
+
+# 5. Check results
+python3 -c "
+import sqlite3
+conn = sqlite3.connect('output/db/db.sqlite')
+for r in conn.execute('SELECT repository, score_env, score_data, score_docs, score_code, score_repro, score_total FROM repositories ORDER BY score_total DESC').fetchall():
+    print(r)
+"
