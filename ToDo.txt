@@ -1,7 +1,10 @@
 # 1. Set your API token
 export ADS_API_TOKEN=your_token_here
 
+
 # 2. Collect papers (run once, do not retry if it fails — wait an hour)
+rm data/db.sqlite
+
 bash collect.sh
 
 # 3. Extract notebook mentions (limit 5)
