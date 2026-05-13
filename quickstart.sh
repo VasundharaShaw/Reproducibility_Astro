@@ -29,6 +29,13 @@ echo "  Reproducibility Astro — Quick Start"
 echo "========================================="
 echo ""
 
+# ── Reset: clear previous data ───────────────────────────────────────────────
+echo "[RESET] Clearing previous data..."
+rm -f data/db.sqlite
+rm -rf output/db output/cloned_repos output/logs output/comparisons
+echo "[RESET] Done."
+echo ""
+
 # ── Step 1: Collect papers from NASA ADS ─────────────────────────────────────
 echo "[1/4] Collecting papers from NASA ADS..."
 bash collect.sh
