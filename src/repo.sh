@@ -1,19 +1,20 @@
 #!/bin/bash
 ###############################################################################
-# repo.sh — Per-repository orchestration and batch SQLite flow
+# src/repo.sh — Per-repository orchestration and batch SQLite flow
 #
-# Reads repo list from:   data/db.sqlite        (DB_FILE)
-# Writes results to:      output/db/db.sqlite   (OUTPUT_DB_FILE)
+# Reads repo list from:   repositories table  (collect_ads schema)
+# Writes results to:      repo_targets table  (execution schema)
+# Both tables live in the single DB_FILE: output/db/db.sqlite
 ###############################################################################
 
 export GITHUB_REPO
 
 # -----------------------------------------------------------------------------
 # create_repository_run()
-# Inserts a new run record into OUTPUT_DB_FILE. Sets global RUN_ID.
+# Inserts a new run record into repository_runs. Sets global RUN_ID.
 # -----------------------------------------------------------------------------
 create_repository_run() {
-    RUN_ID=$(sqlite3 "$OUTPUT_DB_FILE" <<EOF
+    RUN_ID=$(sqlite3 "$DB_FILE" <<EOF
 INSERT INTO repository_runs (repository_id, url, run_status, started_at)
 VALUES ($1, '$2', 'RUNNING', datetime('now'));
 SELECT last_insert_rowid();
@@ -24,11 +25,11 @@ EOF
 
 # -----------------------------------------------------------------------------
 # finalize_repository_run()
-# Updates a run record in OUTPUT_DB_FILE with final status and duration.
+# Updates a run record with final status and duration.
 # -----------------------------------------------------------------------------
 finalize_repository_run() {
     log "[REPO] Finalizing run $1 — status: $2"
-    sqlite3 "$OUTPUT_DB_FILE" <<EOF
+    sqlite3 "$DB_FILE" <<EOF
 UPDATE repository_runs
 SET run_status='$2', error_message='$3', finished_at=datetime('now'), duration_seconds=$4
 WHERE id=$1;
@@ -37,10 +38,10 @@ EOF
 
 # -----------------------------------------------------------------------------
 # get_notebook_language_stats()
-# Counts total and Python notebooks for a repo in OUTPUT_DB_FILE.
+# Counts total and Python notebooks for a repo.
 # -----------------------------------------------------------------------------
 get_notebook_language_stats() {
-    sqlite3 "$OUTPUT_DB_FILE" <<EOF
+    sqlite3 "$DB_FILE" <<EOF
 SELECT COUNT(*), SUM(CASE WHEN LOWER(language)='python' THEN 1 ELSE 0 END)
 FROM notebooks WHERE repository_id=$1;
 EOF
@@ -48,15 +49,15 @@ EOF
 
 # -----------------------------------------------------------------------------
 # get_or_create_repo_id()
-# Looks up or inserts a repo record in OUTPUT_DB_FILE. Returns the row id.
+# Looks up or inserts a repo record in repo_targets. Returns the row id.
 # -----------------------------------------------------------------------------
 get_or_create_repo_id() {
     local repo_path="${1#https://github.com/}"
     local existing_id
-    existing_id=$(sqlite3 "$OUTPUT_DB_FILE" "SELECT id FROM repositories WHERE repository='$repo_path' LIMIT 1;")
+    existing_id=$(sqlite3 "$DB_FILE" "SELECT id FROM repo_targets WHERE repository='$repo_path' LIMIT 1;")
     if [ -n "$existing_id" ]; then echo "$existing_id"; return 0; fi
-    sqlite3 "$OUTPUT_DB_FILE" <<EOF
-INSERT INTO repositories (repository, notebooks, setups, requirements, notebooks_count, setups_count, requirements_count)
+    sqlite3 "$DB_FILE" <<EOF
+INSERT INTO repo_targets (repository, notebooks, setups, requirements, notebooks_count, setups_count, requirements_count)
 VALUES ('$repo_path', '$NOTEBOOK_PATHS', '$SETUP_PATHS', '$REQUIREMENT_PATHS', 0, 0, 0);
 SELECT last_insert_rowid();
 EOF
@@ -64,8 +65,8 @@ EOF
 
 # -----------------------------------------------------------------------------
 # discover_notebooks()
-# Finds all .ipynb files in a cloned repo. Sets NOTEBOOK_PATHS (semicolon-
-# separated, relative to repo root) and updates notebooks_count in OUTPUT_DB_FILE.
+# Finds all .ipynb files in a cloned repo. Sets NOTEBOOK_PATHS and updates
+# notebooks_count in repo_targets.
 # -----------------------------------------------------------------------------
 discover_notebooks() {
     local repo_dir="$1"
@@ -92,18 +93,16 @@ discover_notebooks() {
 
     log "[NOTEBOOK] Found $count notebook(s): $NOTEBOOK_PATHS"
 
-    # Update notebooks column and count in OUTPUT_DB_FILE
-    sqlite3 "$OUTPUT_DB_FILE" <<EOF
-UPDATE repositories
+    sqlite3 "$DB_FILE" <<EOF
+UPDATE repo_targets
 SET notebooks='$NOTEBOOK_PATHS', notebooks_count=$count
 WHERE id=$repo_id;
 EOF
 
-    # Insert each notebook into the notebooks table so comparison can find it
     while IFS= read -r nb_path; do
         [ -z "$nb_path" ] && continue
         safe_path=$(echo "$nb_path" | sed "s/'/''/g")
-        sqlite3 "$OUTPUT_DB_FILE" "INSERT OR IGNORE INTO notebooks (repository_id, name, language) VALUES ($repo_id, '$safe_path', 'python');"
+        sqlite3 "$DB_FILE" "INSERT OR IGNORE INTO notebooks (repository_id, name, language) VALUES ($repo_id, '$safe_path', 'python');"
     done <<< "$notebooks"
 
     log "[NOTEBOOK] Inserted $count notebook record(s) into DB."
@@ -114,8 +113,7 @@ EOF
 
 # -----------------------------------------------------------------------------
 # process_repo()
-# Full per-repo flow: validate → clone → discover notebooks → score →
-# setup env → run notebooks → compare outputs.
+# Full per-repo flow: validate → clone → discover → score → setup → run → compare.
 # -----------------------------------------------------------------------------
 process_repo() {
     REPO_START_TIME=$(now_sec)
@@ -148,18 +146,18 @@ process_repo() {
         return 0
     fi
 
-    # 3. Discover notebooks (populate NOTEBOOK_PATHS)
+    # 3. Discover notebooks
     if ! discover_notebooks "$REPO_DIR" "$REPO_ID"; then
         finalize_repository_run "$RUN_ID" "NO_NOTEBOOKS" "No notebooks found in repo" "$(elapsed_sec "$REPO_START_TIME")"
         return 0
     fi
 
-    # 4. Score repository (ReproScore: 5 categories, 0–5 each, 25 total)
-    python3 pipeline/score.py --repo-dir "$REPO_DIR" --repo-id "$REPO_ID" --db "$OUTPUT_DB_FILE" \
+    # 4. Score repository (RRS)
+    python3 pipeline/score.py --repo-dir "$REPO_DIR" --repo-id "$REPO_ID" --db "$DB_FILE" \
         >> "$LOG_FILE" 2>&1
     log "[REPO] Scoring complete."
 
-    # 5. Log notebook count (language check skipped — assume Python)
+    # 5. Log notebook count
     log "[REPO] Notebooks found: $(echo "$NOTEBOOK_PATHS" | awk -F';' '{print NF}')"
 
     # 6. Process requirements
@@ -195,8 +193,8 @@ process_repo() {
 
 # -----------------------------------------------------------------------------
 # process_sqlite_flow()
-# Batch mode: reads unprocessed repos from DB_FILE (data/db.sqlite),
-# checks OUTPUT_DB_FILE to skip already-processed ones.
+# Batch mode: reads unprocessed repos from the repositories table (collect_ads
+# schema), checks repo_targets to skip already-processed ones.
 # -----------------------------------------------------------------------------
 process_sqlite_flow() {
     processed_repo_ids=()
@@ -209,11 +207,8 @@ process_sqlite_flow() {
             not_in_clause="AND r.id NOT IN ($(IFS=,; echo "${processed_repo_ids[*]}"))"
         fi
 
-        # Read next repo from input DB_FILE.
-        # Only process git-hosted repos (github). Zenodo and personal sites
-        # are skipped here — they will be handled by a dedicated download
-        # stage added later.
-        # WHERE 1=1 ensures the AND clauses below are always valid.
+        # Read next unprocessed github repo from the article-level repositories table.
+        # WHERE 1=1 ensures the AND clauses are always valid.
         repo_data=$(sqlite3 "$DB_FILE" <<EOF
 .mode csv
 .headers off
@@ -231,7 +226,6 @@ EOF
         IFS=',' read -r INPUT_REPO_ID REPO_PATH <<< "$repo_data"
         REPO_PATH=$(echo "$REPO_PATH" | tr -d '\r\n"')
 
-        # Guard: only prepend github.com if it's not already a full URL
         if [[ "$REPO_PATH" == http* ]]; then
             GITHUB_REPO="$REPO_PATH"
         else
@@ -240,18 +234,17 @@ EOF
 
         log "[BATCH] Repo $INPUT_REPO_ID: $GITHUB_REPO"
 
-        # Get or create repo record in OUTPUT_DB_FILE
         NOTEBOOK_PATHS=""; SETUP_PATHS=""; REQUIREMENT_PATHS=""
         REPO_ID=$(get_or_create_repo_id "$GITHUB_REPO")
         export REPO_ID
 
-        # Check if already processed in output DB
         if [ -z "$REPO_ID" ]; then
             log "[BATCH] Could not get repo ID, skipping."
             processed_repo_ids+=("$INPUT_REPO_ID")
             continue
         fi
-        already_run=$(sqlite3 "$OUTPUT_DB_FILE" "SELECT COUNT(*) FROM repository_runs WHERE repository_id=$REPO_ID;")
+
+        already_run=$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM repository_runs WHERE repository_id=$REPO_ID;")
         if [ "$already_run" -gt 0 ]; then
             log "[BATCH] Repo $REPO_ID already processed, skipping."
             processed_repo_ids+=("$INPUT_REPO_ID")

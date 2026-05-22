@@ -2,9 +2,6 @@
 ###############################################################################
 # Reproducibility Astro Pipeline — Main Orchestrator
 #
-# Co-authors:  Vasundhara Shaw
-# License:     GPL-3.0
-#
 # Usage:
 #   From repo root:  bash run.sh
 #   Directly:        bash pipeline/main.sh
@@ -30,13 +27,11 @@ ensure_pipeline_tables
 
 log "[MAIN] Starting pipeline..."
 log "[MAIN] PROJECT_ROOT : $PROJECT_ROOT"
-log "[MAIN] Input DB     : $DB_FILE"
-log "[MAIN] Output DB    : $OUTPUT_DB_FILE"
+log "[MAIN] DB           : $DB_FILE"
 log "[MAIN] Repos dir    : $REPOS_DIR"
 log "[MAIN] Logs dir     : $LOG_DIR"
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
-
 prompt_for_input() {
     read -p "Enter GitHub repo URL: " GITHUB_REPO
     read -p "Enter notebook paths (semicolon-separated): " NOTEBOOK_PATHS
@@ -45,13 +40,13 @@ prompt_for_input() {
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
-
 print_run_summary() {
     local elapsed=$(( $(date +%s) - $1 ))
     local total success failed
-    total=$(sqlite3   "$OUTPUT_DB_FILE" "SELECT COUNT(*) FROM repository_runs;")
-    success=$(sqlite3 "$OUTPUT_DB_FILE" "SELECT COUNT(*) FROM repository_runs WHERE run_status = 'SUCCESS';")
-    failed=$(sqlite3  "$OUTPUT_DB_FILE" "SELECT COUNT(*) FROM repository_runs WHERE run_status NOT IN ('SUCCESS');")
+    total=$(sqlite3   "$DB_FILE" "SELECT COUNT(*) FROM repository_runs;")
+    success=$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM repository_runs WHERE run_status = 'SUCCESS';")
+    failed=$(sqlite3  "$DB_FILE" "SELECT COUNT(*) FROM repository_runs WHERE run_status NOT IN ('SUCCESS');")
+
     echo ""
     echo "════════════════════════════════════════"
     echo "        PIPELINE RUN SUMMARY            "
@@ -60,14 +55,13 @@ print_run_summary() {
     echo "  Successful        : $success"
     echo "  Failed/Skipped    : $failed"
     echo "  Elapsed time      : ${elapsed}s"
-    echo "  Results stored in : $OUTPUT_DB_FILE"
+    echo "  Results stored in : $DB_FILE"
     echo "  Logs directory    : $LOG_DIR"
     echo "════════════════════════════════════════"
     echo ""
 }
 
 # ── Run ───────────────────────────────────────────────────────────────────────
-
 RUN_START=$(date +%s)
 
 echo ""
