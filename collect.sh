@@ -47,7 +47,7 @@ echo ""
 
 # ── Fetch and populate in one step ────────────────────────────────────────────
 echo "--------------------------------------------"
-echo " Fetching from NASA ADS → data/db.sqlite"
+echo " Fetching from NASA ADS → output/db/db.sqlite"
 echo "--------------------------------------------"
 
 python3 "$SCRIPT_DIR/pipeline/collect_ads.py"
@@ -57,7 +57,7 @@ echo ""
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo "============================================"
 echo " Data collection complete."
-echo " data/db.sqlite — populated with articles,"
+echo " output/db/db.sqlite — populated with articles,"
 echo "   journals, authors, repositories, and"
 echo "   notebook_mentions table (schema ready)."
 echo ""

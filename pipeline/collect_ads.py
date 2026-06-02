@@ -41,7 +41,7 @@ from urllib.parse import urlparse
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_FILE      = PROJECT_ROOT / "data" / "db.sqlite"
+DB_FILE      = PROJECT_ROOT / "output" / "db" / "db.sqlite"
 
 # ── ADS API settings ───────────────────────────────────────────────────────────
 
