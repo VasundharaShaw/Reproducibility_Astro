@@ -2,7 +2,7 @@
 ###############################################################################
 # mentions.sh — Notebook Mention Extraction Entry Point
 #
-# For each article in data/db.sqlite that has an arXiv ID, fetches the
+# For each article in output/db/db.sqlite that has an arXiv ID, fetches the
 # LaTeX source tarball from arXiv and extracts every notebook mention into
 # the notebook_mentions table.
 #
@@ -30,10 +30,10 @@ command -v python3 >/dev/null 2>&1 || fail "python3 not found."
 command -v sqlite3 >/dev/null 2>&1 || fail "sqlite3 not found."
 
 # ── Database check ─────────────────────────────────────────────────────────────
-DB_FILE="$SCRIPT_DIR/data/db.sqlite"
+DB_FILE="$SCRIPT_DIR/output/db/db.sqlite"
 
 if [ ! -f "$DB_FILE" ]; then
-    echo "[ERROR] data/db.sqlite not found."
+    echo "[ERROR] output/db/db.sqlite not found."
     echo ""
     echo "  Run collect.sh first to populate the database:"
     echo "    bash collect.sh"
@@ -42,7 +42,7 @@ fi
 
 ARTICLE_COUNT=$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM article;" 2>/dev/null || echo "0")
 if [ "$ARTICLE_COUNT" -eq 0 ]; then
-    echo "[ERROR] No articles found in data/db.sqlite."
+    echo "[ERROR] No articles found in output/db/db.sqlite."
     echo ""
     echo "  Run collect.sh first:"
     echo "    bash collect.sh"
@@ -51,7 +51,7 @@ fi
 
 echo "[CHECK] python3 found."
 echo "[CHECK] sqlite3 found."
-echo "[CHECK] data/db.sqlite found — $ARTICLE_COUNT articles."
+echo "[CHECK] output/db/db.sqlite found — $ARTICLE_COUNT articles."
 echo ""
 
 # ── Run extraction ─────────────────────────────────────────────────────────────

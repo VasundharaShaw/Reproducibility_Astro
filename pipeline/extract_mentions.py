@@ -1,7 +1,7 @@
 """
 pipeline/extract_mentions.py
 
-For each article in data/db.sqlite that has an arXiv ID, fetch the LaTeX
+For each article in output/db/db.sqlite that has an arXiv ID, fetch the LaTeX
 source tarball from arXiv, parse all .tex files, and extract every mention
 of Jupyter/notebook indicators into the notebook_mentions table.
 
