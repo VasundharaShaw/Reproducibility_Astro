@@ -10,6 +10,7 @@ compare_notebook_outputs_json() {
         log "[NOTEBOOK] Executed notebook missing: $notebook2 — skipping"
         return 0
     fi
+    export OUTPUT_DB_FILE="$DB_FILE"
     python3 -u "$PROJECT_ROOT/analysis/compare_notebook.py" \
         "$notebook1" "$notebook2" "$NOTEBOOK_PATH" "$REPO_ID" \
         --json "$comparison_file" 2>&1 | tee -a "$LOG_FILE"
