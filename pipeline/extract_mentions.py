@@ -37,16 +37,10 @@ import requests
 from pathlib import Path
 from urllib.parse import urlparse
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_FILE      = PROJECT_ROOT / "output" / "db" / "db.sqlite"
-
-# ── arXiv settings ─────────────────────────────────────────────────────────────
-
-ARXIV_EPRINT_URL  = "https://arxiv.org/e-print/{arxiv_id}"
-REQUEST_DELAY_SEC = 3          # arXiv bulk-access courtesy limit
-REQUEST_TIMEOUT   = 30
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config.config import (PROJECT_ROOT, DB_FILE, require_db,
+                            ARXIV_EPRINT_URL, REQUEST_DELAY_SEC, REQUEST_TIMEOUT)
 
 # ── Notebook mention patterns ──────────────────────────────────────────────────
 

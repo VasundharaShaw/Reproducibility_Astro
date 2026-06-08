@@ -40,8 +40,9 @@ from urllib.parse import urlparse
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_FILE      = PROJECT_ROOT / "output" / "db" / "db.sqlite"
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config.config import PROJECT_ROOT, DB_FILE, require_ads_token
 
 # ── ADS API settings ───────────────────────────────────────────────────────────
 
@@ -473,11 +474,6 @@ def build_query(start_date, end_date):
 
 
 def fetch_page(query, start, rows):
-    if not ADS_API_TOKEN:
-        raise EnvironmentError(
-            "[ERROR] ADS_API_TOKEN is not set.\n"
-            "Run: export ADS_API_TOKEN=your_token_here"
-        )
     headers  = {"Authorization": f"Bearer {ADS_API_TOKEN}"}
     params   = {"q": query, "fl": ",".join(FIELDS),
                 "rows": rows, "start": start, "sort": "pubdate desc"}
