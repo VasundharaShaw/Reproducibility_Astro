@@ -24,7 +24,7 @@ from pathlib import Path
 # Ensure pipeline/ is on sys.path so the vendored reproscore package is importable
 sys.path.insert(0, str(Path(__file__).parent))
 
-from reproscore.scoring.rrs import RRSScorer
+from reproscore.src.scoring.rrs import RRSScorer
 
 
 # ---------------------------------------------------------------------------

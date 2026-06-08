@@ -1,14 +1,17 @@
 """
-pipeline/reproscore/scoring/rubric.py
-======================================
+src/scoring/rubric.py
+=====================
 Community rubric loader and validator.
-
-Vendored from github.com/myVSR/reproscore — do not edit directly.
-One change from upstream: added project-root candidate to YAML search path.
+Rubrics are versioned YAML configurations that override default category
+weights and gate parameters, enabling domain-specific scoring.
+Run standalone:
+    from src.scoring.rubric import load_rubric, Rubric
+    rubric = load_rubric("config/default_rubric.yaml")
+    print(rubric.categories)
 """
-
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -75,22 +78,10 @@ class Rubric:
 
 
 def load_rubric(path: Optional[str | Path] = None) -> Rubric:
-    """
-    Load a rubric from YAML file, or return the built-in defaults.
-
-    Search order when no explicit path is given:
-      1. project_root/config/default_rubric.yaml  (Reproducibility_Astro layout)
-      2. config/default_rubric.yaml               (relative to CWD)
-      3. default_rubric.yaml                      (CWD fallback)
-    Falls back to hardcoded defaults if yaml is unavailable or no file found.
-    """
     data = dict(_DEFAULTS)
-
     if path is None:
-        # parent = scoring/, parent.parent = reproscore/, parent.parent.parent = pipeline/
-        # parent.parent.parent.parent = project root
         candidates = [
-            Path(__file__).parent.parent.parent.parent / "config" / "default_rubric.yaml",
+            Path(__file__).parent.parent.parent / "config" / "default_rubric.yaml",
             Path("config/default_rubric.yaml"),
             Path("default_rubric.yaml"),
         ]
@@ -98,7 +89,6 @@ def load_rubric(path: Optional[str | Path] = None) -> Rubric:
             if c.exists():
                 path = c
                 break
-
     if path and _YAML_AVAILABLE:
         try:
             with open(path, "r") as f:
@@ -108,7 +98,6 @@ def load_rubric(path: Optional[str | Path] = None) -> Rubric:
         except Exception as e:
             import warnings
             warnings.warn(f"Could not load rubric from {path}: {e}. Using defaults.")
-
     rubric = Rubric(
         name=data.get("name", "default"),
         version=str(data.get("version", "1.0")),
