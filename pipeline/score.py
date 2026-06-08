@@ -21,9 +21,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
-# Ensure pipeline/ is on sys.path so the vendored reproscore package is importable
-sys.path.insert(0, str(Path(__file__).parent))
-
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config.config import DB_FILE as _DEFAULT_DB
 from reproscore.src.scoring.rrs import RRSScorer
 
 
