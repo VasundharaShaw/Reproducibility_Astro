@@ -29,7 +29,7 @@ All results are stored in a single SQLite database at `output/db/db.sqlite`.
 2. **Classifies** each paper by notebook category based on co-occurring hosting signals
 3. **Fetches** arXiv LaTeX source tarballs and extracts every notebook mention with full context, section, link form, and host
 4. **Clones** GitHub-hosted repositories
-5. **Scores** each repository using Sheeba Samuel's [ReproScore (RRS)](https://github.com/myVSR/reproscore) framework (5 categories, 0–100 scale)
+5. **Scores** each repository using Sheeba Samuel's [ReproScore (RRS)](https://github.com/myVSR/reproscore) framework (5 categories, 26 sub-metrics, 0–100 scale)
 6. **Detects** the required Python version from each repo's metadata
 7. **Creates** an isolated pyenv + venv environment per repository
 8. **Executes** each notebook via `nbconvert`
@@ -40,18 +40,60 @@ All results are stored in a single SQLite database at `output/db/db.sqlite`.
 
 ## RRS Scoring — Repository Readiness
 
-Each cloned repository is scored using the vendored [ReproScore](https://github.com/myVSR/reproscore) framework (see `pipeline/reproscore/`). Scores are computed across five categories and written to the `repo_targets` table.
+Each cloned repository is scored using the vendored [ReproScore](https://github.com/myVSR/reproscore) framework (see `pipeline/reproscore/`). The framework computes three complementary scores:
 
-| Column | Category | Weight | Description |
-|---|---|---|---|
-| `score_E` | Environment | 30% | Requirements files, Dockerfile, environment spec |
-| `score_A` | Data Access | 25% | Zenodo/DOI links, data directories, download scripts |
-| `score_D` | Documentation | 20% | README quality, markdown cells in notebooks |
-| `score_C` | Code Quality | 15% | Code organisation, error handling, cell structure |
-| `score_S` | Repro. Signals | 10% | CI config, random seeds, test suite, Binder badge |
-| `rrs` | **Total RRS** | — | Weighted composite score, 0–100 |
+| Score | Description |
+|---|---|
+| **RRS** | Reproducibility Readiness Score — static analysis of repo artefacts (0–100) |
+| **ROS** | Reproducibility Outcome Score — computed from execution evidence (0–100) |
+| **RCS** | Reproducibility Composite Score — blends RRS and ROS via coverage weight α |
 
-Scoring runs automatically during `run.sh` after notebook discovery and before environment setup.
+### RRS Categories
+
+Scores are computed across five categories and written to the `repo_targets` table.
+
+| Column | Category | Weight | τ | k | Sub-metrics |
+|---|---|---|---|---|---|
+| `score_E` | Environment Specification | 30% | 40 | 1.5 | dep_pinning, container_spec, env_bootstrap, python_version_declared |
+| `score_A` | Data Accessibility | 25% | 30 | 1.5 | data_description, data_pointer, workflow_orchestration, data_acquisition_script |
+| `score_D` | Documentation | 20% | 20 | 1.2 | doc_structure, install_instructions, usage_examples, inline_explanation_density, execution_entry_point, docstring_coverage, reuse_metadata |
+| `score_C` | Code Portability | 15% | 25 | 1.2 | no_absolute_paths, import_resolvability, no_hardcoded_credentials, silent_failure_masking |
+| `score_S` | Reproducibility Signals | 10% | 30 | 1.2 | seed_management, notebook_exec_order, test_file_presence, expected_outputs, ci_presence, config_externalised, hardware_requirements |
+| `rrs` | **Total RRS** | — | — | — | Weighted composite with gate function and hard penalties |
+
+### Gate Function
+
+Sub-threshold scores are penalised non-linearly:
+
+```
+g(x, τ, k) = x / 100              if x ≥ τ
+           = (x / τ)^k · (τ/100)  if x < τ
+```
+
+Core categories (E, A) use k = 1.5; quality categories (D, C, S) use k = 1.2.
+
+### Hard Penalties
+
+| Condition | Penalty |
+|---|---|
+| E < 10 (no environment specification) | −20 pts |
+| A < 10 (no data artefacts) | −15 pts |
+| seed score < 50 (stochastic ops, no seeds) | −10 pts |
+
+### Community Rubric
+
+Override any weight or gate parameter via a YAML profile in `config/default_rubric.yaml`:
+
+```yaml
+name: astrophysics-v1
+version: "1.0"
+categories:
+  E: {weight: 0.30, tau: 40, k: 1.5}
+  A: {weight: 0.25, tau: 30, k: 1.5}
+  D: {weight: 0.20, tau: 20, k: 1.2}
+  C: {weight: 0.15, tau: 25, k: 1.2}
+  S: {weight: 0.10, tau: 30, k: 1.2}
+```
 
 ---
 
@@ -70,7 +112,16 @@ Scoring runs automatically during `run.sh` after notebook discovery and before e
 export ADS_API_TOKEN=your_ads_token_here
 bash collect.sh
 bash mentions.sh --limit 50    # test with 50 articles; remove --limit for full run
-TARGET_COUNT=5 bash run.sh     # process 5 repos at a time to avoid memory limits
+TARGET_COUNT=2 bash run.sh     # process 2 repos at a time to avoid memory limits
+```
+
+Alternatively, use the Python entry point:
+
+```bash
+export ADS_API_TOKEN=your_ads_token_here
+python3 pipeline/main.py collect
+python3 pipeline/main.py mentions
+python3 pipeline/main.py run --count 2
 ```
 
 > **Note:** Git identity and environment variables reset between JupyterHub sessions. Re-export tokens and re-run `git config --global` after each login.
@@ -89,7 +140,9 @@ Reproducibility_Astro/
 │   ├── apt.txt              # Additional system packages for pyenv build dependencies
 │   └── postBuild            # Post-build script — configures pyenv PATH
 ├── config/
-│   └── config.sh            # Pipeline configuration (paths, DB location, settings)
+│   ├── config.sh            # Pipeline configuration for bash scripts (paths, DB, settings)
+│   ├── config.py            # Pipeline configuration for Python scripts (mirrors config.sh)
+│   └── default_rubric.yaml  # RRS rubric — weights, gate parameters, penalties
 ├── output/                  # All pipeline outputs (created at runtime)
 │   ├── cloned_repos/        # Cloned repositories
 │   ├── db/
@@ -105,18 +158,20 @@ Reproducibility_Astro/
 │   ├── checks.sh            # Pre-flight validation
 │   └── logging.sh           # Logging utilities
 ├── pipeline/
+│   ├── main.py              # Python entry point — collect / mentions / run / score
+│   ├── main.sh              # Main pipeline orchestrator (bash)
 │   ├── collect_ads.py       # NASA ADS collection + article categorisation
 │   ├── extract_mentions.py  # arXiv LaTeX full-text mention extractor
 │   ├── score.py             # RRS scoring — calls vendored reproscore
-│   ├── main.sh              # Main pipeline orchestrator
 │   └── reproscore/          # Vendored ReproScore package (Sheeba Samuel, TU Chemnitz)
-│       ├── scoring/
-│       │   ├── rrs.py       # RRSScorer — main scoring class
-│       │   └── rubric.py    # Scoring rubric definitions
-│       └── utils/
-│           └── notebook_paths.py
-├── config/
-│   └── default_rubric.yaml  # RRS rubric configuration
+│       └── src/
+│           ├── scoring/
+│           │   ├── rrs.py       # RRSScorer — 26 sub-metrics, 5 categories
+│           │   ├── ros.py       # ROSScorer — execution outcome score
+│           │   ├── rcs.py       # RCSScorer — composite score (RRS + ROS)
+│           │   └── rubric.py    # Rubric loader and validator
+│           └── utils/
+│               └── notebook_paths.py  # Notebook discovery and exclusion logic
 ├── analysis/
 │   ├── astro_reproducibility_analysis.ipynb  # Main analysis notebook (4 RQs + ablation)
 │   ├── compare_notebook.py  # Output comparison script
@@ -134,8 +189,8 @@ Reproducibility_Astro/
 
 | Token | Where to get it | Required for |
 |---|---|---|
-| `ADS_API_TOKEN` | [ui.adsabs.harvard.edu](https://ui.adsabs.harvard.edu) → Account → Settings → API Token | `collect.sh` |
-| `GITHUB_API_TOKEN` | GitHub → Settings → Developer settings → Personal access tokens | `run.sh` (batch mode) |
+| `ADS_API_TOKEN` | [ui.adsabs.harvard.edu](https://ui.adsabs.harvard.edu) → Account → Settings → API Token | `collect.sh` / `main.py collect` |
+| `GITHUB_API_TOKEN` | GitHub → Settings → Developer settings → Personal access tokens | `run.sh` / `main.py run` (batch mode) |
 
 ```bash
 export ADS_API_TOKEN=your_ads_token_here
@@ -149,7 +204,7 @@ export GITHUB_API_TOKEN=your_github_token_here   # only needed for run.sh
 All dependencies are pre-installed by `binder/Dockerfile` when running on NFDI JupyterHub. If running locally:
 
 ```bash
-pip install requests nbformat nbdime nbconvert pandas matplotlib seaborn scipy
+pip install requests nbformat nbdime nbconvert pandas matplotlib seaborn scipy pyyaml
 ```
 
 You also need Python 3.10+, SQLite3, Git, and pyenv installed on your system.
@@ -162,9 +217,11 @@ You also need Python 3.10+, SQLite3, Git, and pyenv installed on your system.
 
 ```bash
 bash collect.sh
+# or
+python3 pipeline/main.py collect
 ```
 
-Queries NASA ADS for astrophysics papers (last 2 months) that mention Jupyter notebooks in their title, abstract, or body text. Each paper is classified into a notebook category and written to `output/db/db.sqlite`.
+Queries NASA ADS for astrophysics papers (last 2 months) that mention Jupyter notebooks. Each paper is classified into a notebook category and written to `output/db/db.sqlite`.
 
 ### Step 2 — Extract notebook mentions
 
@@ -172,6 +229,8 @@ Queries NASA ADS for astrophysics papers (last 2 months) that mention Jupyter no
 bash mentions.sh
 # or with a limit for testing:
 bash mentions.sh --limit 10
+# or
+python3 pipeline/main.py mentions
 ```
 
 For each article with an arXiv ID, fetches the LaTeX source tarball and extracts every notebook mention into the `notebook_mentions` table. Idempotent — already-processed articles are skipped. arXiv requests are rate-limited to 1 per 3 seconds.
@@ -188,9 +247,11 @@ Only needed on a fresh session before the first `run.sh` call.
 
 ```bash
 TARGET_COUNT=2 bash run.sh
+# or
+python3 pipeline/main.py run --count 2
 ```
 
-Processes GitHub-hosted repositories. For each repo the pipeline clones it, scores it with RRS, sets up an isolated Python environment, executes all notebooks, and compares outputs. Choose batch mode (option 2) to process repos from the database automatically.
+Processes GitHub-hosted repositories. For each repo the pipeline clones it, scores it with RRS, sets up an isolated Python environment, executes all notebooks, and compares outputs. Keep `TARGET_COUNT` at 1–2 on JupyterHub to avoid memory limits.
 
 ### Step 5 — Analyse results
 
