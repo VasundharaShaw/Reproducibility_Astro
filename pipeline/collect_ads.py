@@ -452,9 +452,12 @@ def create_repositories(conn, article_id, repo_links, all_links):
 # ── ADS fetch ──────────────────────────────────────────────────────────────────
 
 def get_date_range():
+    # Date range: past 3 months. Adapt as needed, e.g. change 90 to 365 for 1 year,
+    # or hardcode a range: return "2026-01-01", "2026-03-31"
     today = datetime.date.today()
-    start = today.replace(year=today.year - 5)
+    start = today - datetime.timedelta(days=90)
     return start.isoformat(), today.isoformat()
+
 
 
 def build_query(start_date, end_date):
