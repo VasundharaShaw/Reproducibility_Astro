@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS repo_targets (
     score_A             REAL,
     score_D             REAL,
     score_C             REAL,
-    score_S             REAL
+    score_S             REAL,
+    paper_doi           TEXT
 );
 CREATE TABLE IF NOT EXISTS notebooks (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
