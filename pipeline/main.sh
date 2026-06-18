@@ -84,3 +84,35 @@ else
 fi
 
 print_run_summary "$RUN_START"
+
+# ── Export execution tables to CSV ────────────────────────────────────────────
+python3 - << 'PYEOF'
+import sqlite3, csv
+from pathlib import Path
+import os
+
+db = os.environ.get("DB_FILE", "output/db/db.sqlite")
+csv_dir = Path(os.environ.get("PROJECT_ROOT", ".")) / "output" / "csv"
+csv_dir.mkdir(parents=True, exist_ok=True)
+
+tables = ["repo_targets", "repository_runs", "notebooks",
+          "notebook_executions", "notebook_reproducibility_metrics"]
+conn = sqlite3.connect(db)
+conn.row_factory = sqlite3.Row
+
+for table in tables:
+    try:
+        rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+        if not rows:
+            print(f"[CSV] {table}: empty, skipping")
+            continue
+        with open(csv_dir / f"{table}.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+            writer.writeheader()
+            writer.writerows([dict(r) for r in rows])
+        print(f"[CSV] {table}: {len(rows)} rows -> {csv_dir}/{table}.csv")
+    except Exception as e:
+        print(f"[CSV] {table}: ERROR - {e}")
+
+conn.close()
+PYEOF
