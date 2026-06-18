@@ -261,7 +261,7 @@ def fetch_previous_execution(conn, repository_id, notebook_id):
             e.diff_count,
             e.duration
         FROM notebooks n
-        LEFT JOIN executions e
+        LEFT JOIN notebook_executions e
                ON e.notebook_id = n.id
               AND e.repository_id = n.repository_id
         WHERE n.repository_id = ?
