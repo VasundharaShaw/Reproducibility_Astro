@@ -257,9 +257,9 @@ def fetch_previous_execution(conn, repository_id, notebook_id):
         """
         SELECT
             n.code_cells,
-            e.diff,
-            e.diff_count,
-            e.duration
+            e.total_code_cells,
+            e.executed_cells,
+            e.execution_duration
         FROM notebooks n
         LEFT JOIN notebook_executions e
                ON e.notebook_id = n.id
