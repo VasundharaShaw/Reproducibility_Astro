@@ -33,6 +33,7 @@ import re
 import json
 import time
 import sqlite3
+import csv
 import datetime
 import requests
 from pathlib import Path
@@ -404,11 +405,24 @@ def create_authors(conn, record, article_id):
     conn.commit()
 
 
+def count_notebooks_on_github(repo_path):
+    """Check GitHub API for number of .ipynb files in a repo."""
+    try:
+        clean = repo_path.rstrip("/").removesuffix(".git")
+        url = f"https://api.github.com/repos/{clean}/git/trees/HEAD?recursive=1"
+        r = requests.get(url, timeout=10, headers={"Accept": "application/vnd.github.v3+json"})
+        if r.status_code != 200:
+            return 0
+        tree = r.json().get("tree", [])
+        return sum(1 for f in tree if f.get("path", "").endswith(".ipynb"))
+    except Exception:
+        return 0
+
+
 def create_repositories(conn, article_id, repo_links, all_links):
     """
     Insert all extracted URLs into repositories table with host_type.
-    GitHub repos use normalised path; others use the raw URL as repository.
-    No GitHub API check — discovery happens at pipeline run time.
+    GitHub repos: checks GitHub API for notebook count before inserting.
     """
     cur      = conn.cursor()
     inserted = 0
@@ -419,12 +433,14 @@ def create_repositories(conn, article_id, repo_links, all_links):
         cur.execute("SELECT id FROM repositories WHERE repository = ?", (repo_path,))
         if cur.fetchone():
             continue
+        nb_count = count_notebooks_on_github(repo_path)
+        print(f"  [GITHUB] {repo_path} → {nb_count} notebooks")
         cur.execute(
             """INSERT INTO repositories
                    (article_id, domain, repository, host_type,
                     notebooks_count, setups_count, requirements_count, processed)
-               VALUES (?, 'github.com', ?, 'github', 0, 0, 0, 0)""",
-            (article_id, repo_path),
+               VALUES (?, 'github.com', ?, 'github', ?, 0, 0, 0)""",
+            (article_id, repo_path, nb_count),
         )
         inserted += 1
 
@@ -513,6 +529,36 @@ def fetch_all_articles(query):
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
+
+def export_tables_to_csv():
+    """Export all collection tables from the DB to output/csv/."""
+    csv_dir = Path(PROJECT_ROOT) / "output" / "csv"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
+    tables = ["journal", "article", "author", "repositories", "notebook_mentions"]
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+
+    for table in tables:
+        out_path = csv_dir / f"{table}.csv"
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT * FROM {table}")
+            rows = cur.fetchall()
+            if not rows:
+                print(f"[CSV] {table}: empty, skipping")
+                continue
+            with open(out_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+                writer.writeheader()
+                writer.writerows([dict(r) for r in rows])
+            print(f"[CSV] {table}: {len(rows)} rows → {out_path}")
+        except Exception as e:
+            print(f"[CSV] {table}: ERROR — {e}")
+
+    conn.close()
+
+
 def main():
     start_date, end_date = get_date_range()
     print(f"[ADS] Date range: {start_date} to {end_date}\n")
@@ -551,6 +597,8 @@ def main():
         repos += create_repositories(conn, article_id, repo_links, all_links)
 
     conn.close()
+
+    export_tables_to_csv()
 
     print(f"\n[DONE]")
     print(f"  Articles created : {created}")
