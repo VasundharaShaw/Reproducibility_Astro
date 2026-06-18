@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS notebooks (
     repository_id   INTEGER,
     name            TEXT,
     language        TEXT,
+    code_cells      INTEGER,
     FOREIGN KEY (repository_id) REFERENCES repo_targets(id)
 );
 CREATE TABLE IF NOT EXISTS repository_runs (
