@@ -252,8 +252,6 @@ EOF
         fi
 
         processed_repo_ids+=("$INPUT_REPO_ID")
-        isExecutedSuccessfully="false"
-
         if ! process_repo "$GITHUB_REPO" "$NOTEBOOK_PATHS" "$SETUP_PATHS" "$REQUIREMENT_PATHS"; then
             REPO_NAME=$(basename "$REPO_PATH")
             [ -d "$REPOS_DIR/$REPO_NAME" ] && rm -rf "$REPOS_DIR/$REPO_NAME"
