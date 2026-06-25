@@ -32,7 +32,7 @@ REPO_TOTAL_TIME = float(os.getenv("REPO_TOTAL_TIME", 0))
 GITHUB_REPO = os.environ.get("GITHUB_REPO")
 NOTEBOOKS_COUNT = os.environ.get("NOTEBOOKS_COUNT")
 EXEC_LOG_PATH = Path(os.environ.get("LOG_DIR", "")) / "notebook_execution_times.log"
-RUN_ID = int(os.environ.get("RUN_ID"))
+RUN_ID = int(os.environ.get("RUN_ID") or 0)
 
 if not OUTPUT_DB_FILE:
     raise RuntimeError(

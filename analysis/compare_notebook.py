@@ -88,10 +88,10 @@
 import argparse
 import json
 from pathlib import Path
-from analysis.nbprocess.loader import load_notebook
-from analysis.nbprocess.diff import diff_notebooks_safe
-from analysis.nbprocess.summary import build_detailed_summary, extract_error_from_notebook
-from analysis.nbprocess.filesystem import ensure_parent_dir
+from nbprocess.loader import load_notebook
+from nbprocess.diff import diff_notebooks_safe
+from nbprocess.summary import build_detailed_summary, extract_error_from_notebook
+from nbprocess.filesystem import ensure_parent_dir
 
 def main():
     parser = argparse.ArgumentParser()

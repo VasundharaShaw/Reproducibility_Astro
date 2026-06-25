@@ -183,6 +183,8 @@ def process_repo(
         comp_dir=comp_dir,
         db_file=db_file,
         project_root=project_root,
+        run_id=run_id,
+        log_dir=log_dir,
         log_file=log_file,
     )
     cleanup_pyenv_env(env_result.venv_dir)

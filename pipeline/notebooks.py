@@ -7,6 +7,7 @@ compare_notebook_outputs_json).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,8 +21,6 @@ def discover_notebooks(repo_dir: Path, repo_id: int, db_file: Path) -> str:
     Find all .ipynb files in *repo_dir* (excluding checkpoints and _output files).
     Insert records into the notebooks table. Update notebooks_count in repo_targets.
     Return the semicolon-separated notebook paths (relative to repo_dir).
-
-    Replaces bash discover_notebooks().
     """
     import sqlite3
 
@@ -69,18 +68,19 @@ def compare_notebook_outputs(
     comp_dir: Path,
     db_file: Path,
     project_root: Path,
+    run_id: int,
+    log_dir: Path,
     log_file: Path | None = None,
 ) -> None:
     """
     Compare original vs executed notebooks for all notebooks in *notebook_paths*.
     Writes JSON comparison files to *comp_dir* and calls compare_notebook.py.
-
-    Replaces bash compare_notebook_outputs() and compare_notebook_outputs_json().
     """
     log(f"[NOTEBOOK] Comparing outputs for: {repo_dir.name}")
     comp_dir.mkdir(parents=True, exist_ok=True)
 
     compare_script = project_root / "analysis" / "compare_notebook.py"
+    nb_count = len([n for n in notebook_paths.split(";") if n.strip()])
 
     for nb_rel in notebook_paths.split(";"):
         nb_rel = nb_rel.strip()
@@ -125,6 +125,10 @@ def compare_notebook_outputs(
             repo_id=resolved_repo_id,
             comparison_file=comparison_file,
             db_file=db_file,
+            run_id=run_id,
+            github_url=github_url,
+            nb_count=nb_count,
+            log_dir=log_dir,
             log_file=log_file,
         )
 
@@ -137,13 +141,21 @@ def _run_comparison(
     repo_id: int,
     comparison_file: Path,
     db_file: Path,
+    run_id: int,
+    github_url: str,
+    nb_count: int,
+    log_dir: Path,
     log_file: Path | None,
 ) -> None:
-    """Call analysis/compare_notebook.py for a single pair of notebooks."""
-    env_extra = {"OUTPUT_DB_FILE": str(db_file)}
-
-    import os
-    env = {**os.environ, **env_extra}
+    """Call analysis/compare_notebook.py with all env vars summary.py requires."""
+    env = {
+        **os.environ,
+        "OUTPUT_DB_FILE": str(db_file),
+        "RUN_ID": str(run_id),
+        "GITHUB_REPO": github_url,
+        "NOTEBOOKS_COUNT": str(nb_count),
+        "LOG_DIR": str(log_dir),
+    }
 
     cmd = [
         sys.executable, str(compare_script),
@@ -153,6 +165,11 @@ def _run_comparison(
     ]
 
     lf_handle = open(log_file, "a") if log_file else subprocess.DEVNULL
-    subprocess.run(cmd, stdout=lf_handle, stderr=subprocess.STDOUT, env=env)
+    r = subprocess.run(cmd, stdout=lf_handle, stderr=subprocess.STDOUT, env=env)
     if log_file:
         lf_handle.close()
+
+    if r.returncode != 0:
+        log(f"[NOTEBOOK] compare_notebook.py failed for {nb_rel} (exit {r.returncode})")
+    else:
+        log(f"[NOTEBOOK] Comparison complete for {nb_rel}")
