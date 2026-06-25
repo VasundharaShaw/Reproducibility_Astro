@@ -8,6 +8,7 @@ Usage:
     python3 pipeline/main.py mentions --limit N  # process only N articles
     python3 pipeline/main.py run              # clone repos, score, execute notebooks
     python3 pipeline/main.py run --count N    # process N repos (default: 1)
+    python3 pipeline/main.py run --interactive  # enter a single repo URL manually
     python3 pipeline/main.py score --repo-dir <path> --repo-id <int>
     python3 pipeline/main.py all              # run full pipeline (collect → mentions → run)
 
@@ -59,7 +60,6 @@ def cmd_setup(args) -> int:
         print("\n[SETUP] ADS_API_TOKEN is required for collect. Set it and re-run.")
         return 1
 
-    # Validate ADS token against the API
     print("\n[SETUP] Validating ADS token ...")
     try:
         import requests
@@ -114,14 +114,12 @@ def cmd_mentions(args) -> int:
 
 
 def cmd_run(args) -> int:
-    """Clone repos, score with RRS, execute notebooks."""
-    env = {**os.environ, "TARGET_COUNT": str(args.count)}
-    print(f"[MAIN] Running pipeline (TARGET_COUNT={args.count}) ...")
-    result = subprocess.run(
-        ["bash", str(PROJECT_ROOT / "pipeline" / "main.sh")],
-        env=env,
+    """Clone repos, score with RRS, execute notebooks — pure Python, no bash."""
+    from pipeline.runner import run
+    return run(
+        target_count=args.count,
+        interactive=getattr(args, "interactive", False),
     )
-    return result.returncode
 
 
 def cmd_score(args) -> int:
@@ -157,8 +155,7 @@ def cmd_all(args) -> int:
         print("[MAIN] mentions failed — aborting.", file=sys.stderr)
         return rc
 
-    rc = cmd_run(args)
-    return rc
+    return cmd_run(args)
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -181,6 +178,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p = sub.add_parser("run", help="Clone, score, and execute repos")
     run_p.add_argument("--count", type=int, default=1,
                        help="Number of repos to process (default: 1)")
+    run_p.add_argument("--interactive", action="store_true",
+                       help="Enter a single repo URL manually (option 1 mode)")
 
     score_p = sub.add_parser("score", help="Score a single cloned repo")
     score_p.add_argument("--repo-dir", required=True, help="Path to cloned repo")

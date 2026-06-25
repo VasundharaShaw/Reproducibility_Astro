@@ -1,27 +1,2 @@
 #!/bin/bash
-###############################################################################
-# Reproducibility Astro — Entry Point
-#
-# Usage: bash run.sh
-#
-# This script checks dependencies, then launches the pipeline.
-###############################################################################
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-echo "============================================"
-echo "   Reproducibility Astro Pipeline"
-echo "============================================"
-
-fail() { echo "[ERROR] $*"; exit 1; }
-
-command -v python3 >/dev/null 2>&1 || fail "python3 not found. Please install Python 3."
-command -v sqlite3 >/dev/null 2>&1 || fail "sqlite3 not found. Please install SQLite."
-command -v git     >/dev/null 2>&1 || fail "git not found. Please install git."
-command -v pyenv   >/dev/null 2>&1 || fail "pyenv not found. See https://github.com/pyenv/pyenv#installation"
-
-echo "[CHECK] All dependencies found."
-echo ""
-
-exec bash "$SCRIPT_DIR/pipeline/main.sh" "$@"
+python3 -m pipeline run "$@"
