@@ -1,0 +1,6 @@
+id,repository_run_id,notebook_execution_id,repository_id,notebook_id,total_code_cells,identical_cells_count,different_cells_count,nondeterministic_cells_count,reproducibility_score
+1,1,1,1,1,14,4,10,0,0.286
+2,1,2,1,2,22,14,8,0,0.636
+3,2,3,2,3,18,12,6,0,0.667
+4,2,4,2,4,16,10,6,0,0.625
+5,2,5,2,5,14,9,5,0,0.643

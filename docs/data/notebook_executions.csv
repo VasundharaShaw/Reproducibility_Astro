@@ -1,0 +1,6 @@
+id,repository_run_id,repository_id,notebook_id,notebook_name,execution_status,execution_duration,total_code_cells,executed_cells,error_type,error_category,error_count
+1,1,1,1,notebooks/plot.ipynb,SUCCESS_WITH_ERRORS,8.07,14,14,FileNotFoundError,FILE_ERROR,10
+2,1,1,2,notebooks/quickstart.ipynb,SUCCESS_WITH_ERRORS,33.13,22,22,FileNotFoundError,FILE_ERROR,4
+3,2,2,3,tutorials/tutorial_groundbased.ipynb,SUCCESS_WITH_ERRORS,9.99,18,18,ModuleNotFoundError,DEPENDENCY_ERROR,2
+4,2,2,4,tutorials/tutorial_satellite.ipynb,SUCCESS_WITH_ERRORS,8.94,16,16,ModuleNotFoundError,DEPENDENCY_ERROR,1
+5,2,2,5,tutorials/tutorial_satellite_part2.ipynb,SUCCESS_WITH_ERRORS,7.54,14,14,ModuleNotFoundError,DEPENDENCY_ERROR,1
