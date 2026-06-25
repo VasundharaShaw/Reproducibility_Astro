@@ -10,7 +10,7 @@
 
 ## Overview
 
-This pipeline is adapted from the [CPRMC biomedical reproducibility pipeline](https://github.com/VasundharaShaw/CPRMC_version_Vasu) and targets astrophysics publications. It collects astrophysics papers from NASA ADS that mention Jupyter notebooks (regardless of hosting platform), extracts full-text mention context from arXiv LaTeX source, then clones, scores, executes, and measures the reproducibility of those notebooks in isolated Python environments.
+This pipeline is adapted from the [CPRMC biomedical reproducibility pipeline](https://github.com/VasundharaShaw/CPRMC_version_Vasu) and targets astrophysics publications. It collects astrophysics papers from NASA ADS that mention Jupyter notebooks, extracts full-text mention context from arXiv LaTeX source, then clones, scores, executes, and measures the reproducibility of those notebooks in isolated Python environments.
 
 It is designed to run on the **[NFDI JupyterHub](https://hub.nfdi-jupyter.de)** — no local Docker installation needed.
 
@@ -19,13 +19,13 @@ All results are stored in a single SQLite database at `output/db/db.sqlite`.
 ### Research Questions
 
 1. **How are Jupyter notebooks referenced in astronomy publications?** — section, link form, and mention context extracted from full LaTeX source
-2. **How stable are the referenced Jupyter notebooks?** — execution success rates and RRS reproducibility scores
+2. **How stable are the referenced Jupyter notebooks?** — execution success rates and reproducibility scores
 3. **Where are referenced Jupyter notebooks located or stored?** — hosting platform classification (GitHub, Zenodo, GitLab, personal sites, etc.)
 4. **How do Jupyter notebooks receive links and citations?** — URL vs DOI vs footnote vs plain-text citation mechanics
 
 ### What it does
 
-1. **Collects** astrophysics papers from NASA ADS (last 2 months) mentioning Jupyter notebooks in title, abstract, or body text — across any hosting platform
+1. **Collects** astrophysics papers from NASA ADS (last 2 months) mentioning Jupyter notebooks
 2. **Classifies** each paper by notebook category based on co-occurring hosting signals
 3. **Fetches** arXiv LaTeX source tarballs and extracts every notebook mention with full context, section, link form, and host
 4. **Clones** GitHub-hosted repositories
@@ -50,8 +50,6 @@ Each cloned repository is scored using the vendored [ReproScore](https://github.
 
 ### RRS Categories
 
-Scores are computed across five categories and written to the `repo_targets` table.
-
 | Column | Category | Weight | τ | k | Sub-metrics |
 |---|---|---|---|---|---|
 | `score_E` | Environment Specification | 30% | 40 | 1.5 | dep_pinning, container_spec, env_bootstrap, python_version_declared |
@@ -63,14 +61,10 @@ Scores are computed across five categories and written to the `repo_targets` tab
 
 ### Gate Function
 
-Sub-threshold scores are penalised non-linearly:
-
 ```
 g(x, τ, k) = x / 100              if x ≥ τ
            = (x / τ)^k · (τ/100)  if x < τ
 ```
-
-Core categories (E, A) use k = 1.5; quality categories (D, C, S) use k = 1.2.
 
 ### Hard Penalties
 
@@ -82,7 +76,7 @@ Core categories (E, A) use k = 1.5; quality categories (D, C, S) use k = 1.2.
 
 ### Community Rubric
 
-Override any weight or gate parameter via a YAML profile in `config/default_rubric.yaml`:
+Override any weight or gate parameter via `config/default_rubric.yaml`:
 
 ```yaml
 name: astrophysics-v1
@@ -112,16 +106,23 @@ categories:
 export ADS_API_TOKEN=your_ads_token_here
 bash collect.sh
 bash mentions.sh --limit 50    # test with 50 articles; remove --limit for full run
-TARGET_COUNT=2 bash run.sh     # process 2 repos at a time to avoid memory limits
+bash run.sh --count 2          # process 2 repos at a time to avoid memory limits
 ```
 
-Alternatively, use the Python entry point:
+Alternatively, use the Python entry point directly:
 
 ```bash
 export ADS_API_TOKEN=your_ads_token_here
 python3 pipeline/main.py collect
-python3 pipeline/main.py mentions
+python3 pipeline/main.py mentions --limit 50
 python3 pipeline/main.py run --count 2
+```
+
+For a single repo (interactive mode):
+
+```bash
+python3 pipeline/main.py run --interactive
+# Enter GitHub URL when prompted
 ```
 
 > **Note:** Git identity and environment variables reset between JupyterHub sessions. Re-export tokens and re-run `git config --global` after each login.
@@ -132,37 +133,29 @@ python3 pipeline/main.py run --count 2
 
 ```
 Reproducibility_Astro/
-├── collect.sh               # Step 1 — collect papers from NASA ADS
-├── mentions.sh              # Step 2 — extract notebook mentions from arXiv LaTeX source
-├── run.sh                   # Step 3 — clone, score, execute, and compare notebooks
+├── collect.sh               # Step 1 — stub: python3 -m pipeline collect
+├── mentions.sh              # Step 2 — stub: python3 -m pipeline mentions
+├── run.sh                   # Step 3 — stub: python3 -m pipeline run
 ├── binder/                  # repo2docker environment definition
 │   ├── Dockerfile           # Full environment spec — Python, Jupyter, pyenv, nbdime
 │   ├── apt.txt              # Additional system packages for pyenv build dependencies
 │   └── postBuild            # Post-build script — configures pyenv PATH
 ├── config/
-│   ├── config.sh            # Pipeline configuration for bash scripts (paths, DB, settings)
-│   ├── config.py            # Pipeline configuration for Python scripts (mirrors config.sh)
+│   ├── config.py            # Pipeline configuration — paths, DB file, token helpers
 │   └── default_rubric.yaml  # RRS rubric — weights, gate parameters, penalties
-├── output/                  # All pipeline outputs (created at runtime)
-│   ├── cloned_repos/        # Cloned repositories
-│   ├── db/
-│   │   └── db.sqlite        # Single DB — all collection and execution results
-│   ├── logs/                # Per-repo execution logs
-│   └── comparisons/         # JSON comparison reports
-├── src/                     # Shell library functions
-│   ├── pyenv.sh             # Python version detection + venv isolation
-│   ├── repo.sh              # Repository cloning, notebook discovery, scoring, processing
-│   ├── requirements.sh      # Dependency extraction
-│   ├── notebooks.sh         # Notebook execution and comparison logic
-│   ├── db.sh                # Database operations + schema
-│   ├── checks.sh            # Pre-flight validation
-│   └── logging.sh           # Logging utilities
-├── pipeline/
-│   ├── main.py              # Python entry point — collect / mentions / run / score
-│   ├── main.sh              # Main pipeline orchestrator (bash)
+├── pipeline/                # All pipeline logic (Python)
+│   ├── __main__.py          # Enables python3 -m pipeline
+│   ├── main.py              # Entry point — subcommands: setup/collect/mentions/run/score/all
+│   ├── runner.py            # Per-repo orchestration and batch processing
+│   ├── db.py                # SQLite schema, CRUD helpers, CSV export
+│   ├── env.py               # Python version detection, venv setup, notebook execution
+│   ├── notebooks.py         # Notebook discovery and output comparison
+│   ├── requirements.py      # Dependency extraction from notebooks and requirements files
+│   ├── checks.py            # Pre-flight validation (git, repo URL)
+│   ├── logger.py            # Logging utilities
 │   ├── collect_ads.py       # NASA ADS collection + article categorisation
 │   ├── extract_mentions.py  # arXiv LaTeX full-text mention extractor
-│   ├── score.py             # RRS scoring — calls vendored reproscore
+│   ├── score.py             # RRS/ROS/RCS scoring — calls vendored reproscore
 │   └── reproscore/          # Vendored ReproScore package (Sheeba Samuel, TU Chemnitz)
 │       └── src/
 │           ├── scoring/
@@ -174,8 +167,14 @@ Reproducibility_Astro/
 │               └── notebook_paths.py  # Notebook discovery and exclusion logic
 ├── analysis/
 │   ├── astro_reproducibility_analysis.ipynb  # Main analysis notebook (4 RQs + ablation)
-│   ├── compare_notebook.py  # Output comparison script
+│   ├── compare_notebook.py  # Output comparison script — writes to notebook_executions
 │   └── nbprocess/           # Notebook processing utilities
+├── output/                  # All pipeline outputs (created at runtime, not committed)
+│   ├── cloned_repos/        # Cloned repositories
+│   ├── db/db.sqlite         # Single DB — all collection and execution results
+│   ├── csv/                 # CSV exports of all tables
+│   ├── logs/                # Per-repo execution logs
+│   └── comparisons/         # JSON comparison reports
 ├── input/                   # Input repo lists for batch mode
 └── tests/
     └── test_pipeline.sh     # Smoke test
@@ -194,10 +193,10 @@ Reproducibility_Astro/
 
 ```bash
 export ADS_API_TOKEN=your_ads_token_here
-export GITHUB_API_TOKEN=your_github_token_here   # only needed for run.sh
+export GITHUB_API_TOKEN=your_github_token_here   # only needed for run
 ```
 
-`mentions.sh` requires no API token — it fetches arXiv source directly.
+`mentions.sh` requires no API token.
 
 ### Dependencies
 
@@ -221,47 +220,47 @@ bash collect.sh
 python3 pipeline/main.py collect
 ```
 
-Queries NASA ADS for astrophysics papers (last 2 months) that mention Jupyter notebooks. Each paper is classified into a notebook category and written to `output/db/db.sqlite`.
+Queries NASA ADS for astrophysics papers (last 2 months) mentioning Jupyter notebooks. Results are written to `output/db/db.sqlite`.
 
 ### Step 2 — Extract notebook mentions
 
 ```bash
-bash mentions.sh
-# or with a limit for testing:
-bash mentions.sh --limit 10
+bash mentions.sh --limit 10   # test with 10 articles
+bash mentions.sh              # full run (rate-limited to 1 req/3s)
 # or
-python3 pipeline/main.py mentions
+python3 pipeline/main.py mentions --limit 10
 ```
 
-For each article with an arXiv ID, fetches the LaTeX source tarball and extracts every notebook mention into the `notebook_mentions` table. Idempotent — already-processed articles are skipped. arXiv requests are rate-limited to 1 per 3 seconds.
+For each article with an arXiv ID, fetches the LaTeX source tarball and extracts every notebook mention. Already-processed articles are skipped automatically.
 
-### Step 3 — Create pipeline tables
-
-```bash
-bash -c 'source config/config.sh; source src/logging.sh; source src/db.sh; ensure_pipeline_tables'
-```
-
-Only needed on a fresh session before the first `run.sh` call.
-
-### Step 4 — Run the pipeline
+### Step 3 — Run the pipeline
 
 ```bash
-TARGET_COUNT=2 bash run.sh
+bash run.sh --count 2
 # or
 python3 pipeline/main.py run --count 2
+
+# single repo (interactive):
+python3 pipeline/main.py run --interactive
 ```
 
-Processes GitHub-hosted repositories. For each repo the pipeline clones it, scores it with RRS, sets up an isolated Python environment, executes all notebooks, and compares outputs. Keep `TARGET_COUNT` at 1–2 on JupyterHub to avoid memory limits.
+For each repo: clones it, scores with RRS/ROS/RCS, sets up an isolated Python environment, executes all notebooks, and compares outputs. Keep `--count` at 1–2 on JupyterHub to avoid memory limits.
 
-### Step 5 — Analyse results
+### Step 4 — Analyse results
 
-Open `analysis/astro_reproducibility_analysis.ipynb` in JupyterLab and run all cells. The notebook covers all four research questions plus RRS ablation analysis (category means by failure mode, rank stability, LOCO, single-category AUC baselines).
+Open `analysis/astro_reproducibility_analysis.ipynb` in JupyterLab and run all cells. Covers all four research questions plus RRS ablation analysis.
+
+### Full pipeline in one command
+
+```bash
+python3 pipeline/main.py all --count 2 --limit 50
+```
 
 ---
 
 ## Database Schema
 
-All data is stored in a single database at `output/db/db.sqlite`.
+All data lives in `output/db/db.sqlite`.
 
 ### Collection tables (populated by `collect.sh` and `mentions.sh`)
 
@@ -270,14 +269,14 @@ All data is stored in a single database at `output/db/db.sqlite`.
 | `journal` | One row per publication venue |
 | `article` | One row per paper — includes `notebook_category`, `doi`, `subject` |
 | `author` | One row per author |
-| `repositories` | One row per extracted repo/URL — includes `host_type` |
-| `notebook_mentions` | One row per in-text notebook mention with context, section, link form, host |
+| `repositories` | One row per extracted repo/URL — includes `host_type`, `notebook_count` |
+| `notebook_mentions` | One row per in-text mention with context, section, link form, host |
 
 ### Execution tables (populated by `run.sh`)
 
 | Table | Description |
 |---|---|
-| `repo_targets` | One row per processed repo — includes RRS columns (`rrs`, `score_E`, `score_A`, `score_D`, `score_C`, `score_S`) and `paper_doi` |
+| `repo_targets` | One row per processed repo — RRS/ROS/RCS scores, notebook paths, `paper_doi` |
 | `notebooks` | Individual notebook records per repository |
 | `repository_runs` | Per-run status, timestamps, duration |
 | `notebook_executions` | Per-notebook execution results and errors |
@@ -292,7 +291,7 @@ All data is stored in a single database at `output/db/db.sqlite`.
 | `jupyter_only` | Jupyter/ipynb indicators present; no recognised hosting platform mentioned |
 | `jupyter_with_github` | Jupyter/ipynb + GitHub |
 | `jupyter_with_zenodo` | Jupyter/ipynb + Zenodo |
-| `jupyter_with_personal` | Jupyter/ipynb + personal/other website (GitLab, Binder, OSF, Figshare, etc.) |
+| `jupyter_with_personal` | Jupyter/ipynb + personal/other website |
 | `jupyter_with_github_zenodo` | Jupyter/ipynb + both GitHub and Zenodo |
 
 ---
